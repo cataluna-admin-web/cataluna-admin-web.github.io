@@ -1,5 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import Chart from 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm';
+import { createRegistration2027Module } from './registration-2027.js?v=20261009-1';
 
 const SUPABASE_URL = 'https://vhemodjxrtjahnpplsyp.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_wIPCLQsZsHeJW1aNpEOabw_JMxkYzLM';
@@ -129,6 +130,8 @@ function activeStatus(row){
 }
 function openModal(title, html){ $('#modalTitle').textContent=title; $('#modalBody').innerHTML=html; $('#modalBackdrop').classList.remove('hidden'); }
 function closeModal(){ $('#modalBackdrop').classList.add('hidden'); $('#modalBody').innerHTML=''; }
+const registration2027Module=createRegistration2027Module({supabase,content,$,$,esc,statusBadge,openPaymentProof,openModal,closeModal,toast});
+async function renderRegistration2027(search='',statusFilter='all'){return registration2027Module.render(search,statusFilter);}
 $('#modalClose').onclick=closeModal;
 $('#modalBackdrop').addEventListener('click',e=>{ if(e.target.id==='modalBackdrop') closeModal(); });
 
