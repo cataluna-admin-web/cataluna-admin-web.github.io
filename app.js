@@ -25,7 +25,7 @@ const sectionTitles = {
   dashboard:'Dashboard', players:'Jugadores', teams:'Equipos', matches:'Partidos',
   attendance:'Asistencia', citations:'Citaciones', commitment:'Compromiso', users:'Usuarios',
   leagues:'Ligas', news:'Novedades', sponsors:'Sponsors', benefits:'Beneficios',
-  payments:'Pagos', concepts:'Conceptos', expenses:'Gastos', balances:'Balances', files:'Archivos'
+  registration2027:'Inscripción 2027', payments:'Pagos', concepts:'Conceptos', expenses:'Gastos', balances:'Balances', files:'Archivos'
 };
 
 function friendlyErrorText(message) {
@@ -192,7 +192,7 @@ async function navigate(section){
   $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.section===section));
   titleEl.textContent=sectionTitles[section]||section; eyebrowEl.textContent='CATALUÑA · ADMIN WEB'; loading();
   try{
-    const fn={dashboard:renderDashboard,players:renderPlayers,teams:renderTeams,matches:renderMatches,attendance:renderAttendance,citations:renderCitations,commitment:renderCommitment,users:renderUsers,leagues:renderLeagues,news:renderNews,sponsors:renderSponsors,benefits:renderBenefits,payments:renderPayments,concepts:renderConcepts,expenses:renderExpenses,balances:renderBalances,files:renderFiles}[section];
+    const fn={dashboard:renderDashboard,players:renderPlayers,teams:renderTeams,matches:renderMatches,attendance:renderAttendance,citations:renderCitations,commitment:renderCommitment,users:renderUsers,leagues:renderLeagues,news:renderNews,sponsors:renderSponsors,benefits:renderBenefits,registration2027:renderRegistration2027,payments:renderPayments,concepts:renderConcepts,expenses:renderExpenses,balances:renderBalances,files:renderFiles}[section];
     await (fn||renderDashboard)(); setUpdated();
   }catch(ex){ console.error(ex); content.innerHTML=`<div class="card"><h3>No pudimos cargar esta sección</h3><p class="section-note">${esc(ex.message||ex)}</p></div>`; }
 }
