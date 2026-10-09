@@ -130,7 +130,7 @@ function activeStatus(row){
 }
 function openModal(title, html){ $('#modalTitle').textContent=title; $('#modalBody').innerHTML=html; $('#modalBackdrop').classList.remove('hidden'); }
 function closeModal(){ $('#modalBackdrop').classList.add('hidden'); $('#modalBody').innerHTML=''; }
-const registration2027Module=createRegistration2027Module({supabase,content,$,$,esc,statusBadge,openPaymentProof,openModal,closeModal,toast});
+const registration2027Module=createRegistration2027Module({supabase,content,$,$:$,esc,statusBadge,openPaymentProof,openModal,closeModal,toast});
 async function renderRegistration2027(search='',statusFilter='all'){return registration2027Module.render(search,statusFilter);}
 $('#modalClose').onclick=closeModal;
 $('#modalBackdrop').addEventListener('click',e=>{ if(e.target.id==='modalBackdrop') closeModal(); });
