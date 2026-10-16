@@ -1233,7 +1233,109 @@ function editExpense(r=null){const cats=['Alquiler','Sueldos','Servicios','Indum
 
 async function renderBalances(){const {data,error}=await supabase.rpc('admin_web_financial_dashboard',{p_months:12});if(error)throw error;const d=data||{},k=d.kpis||{},months=d.monthly||[];content.innerHTML=`<div class="metrics"><div class="metric green"><div class="label">Ingresos período</div><div class="value">${money(k.income_period)}</div></div><div class="metric red"><div class="label">Egresos período</div><div class="value">${money(k.expenses_period)}</div></div><div class="metric brand"><div class="label">Resultado</div><div class="value">${money(k.net_period)}</div></div><div class="metric"><div class="label">Margen</div><div class="value">${Number(k.margin_pct||0).toLocaleString('es-AR',{maximumFractionDigits:1})}%</div></div></div><div class="grid-2"><div class="card"><h3>Resultado mensual</h3><div class="chart-wrap"><canvas id="balanceBar"></canvas></div></div><div class="card"><h3>Ingresos, gastos y resultado</h3><div class="chart-wrap"><canvas id="balanceLine"></canvas></div></div></div><div class="grid-2" style="margin-top:18px"><div class="card"><h3>Gastos por categoría</h3><div class="chart-wrap small"><canvas id="balanceExpenseCat"></canvas></div></div><div class="card"><h3>Lectura del negocio</h3><div class="kpi-line"><span>Promedio ingreso mensual</span><strong>${money(k.avg_income_month)}</strong></div><div class="kpi-line"><span>Promedio gasto mensual</span><strong>${money(k.avg_expenses_month)}</strong></div><div class="kpi-line"><span>Deuda total vencida</span><strong>${money(k.total_debt)}</strong></div><div class="kpi-line"><span>Ingreso mensual esperado</span><strong>${money(k.expected_monthly)}</strong></div><div class="kpi-line"><span>Resultado promedio mensual</span><strong>${money(Number(k.avg_income_month||0)-Number(k.avg_expenses_month||0))}</strong></div></div></div>`;charts.push(new Chart($('#balanceBar'),{type:'bar',data:{labels:months.map(x=>x.label),datasets:[{label:'Ingresos',data:months.map(x=>x.income),backgroundColor:'#E1262C'},{label:'Gastos',data:months.map(x=>x.expenses),backgroundColor:'#F4D000'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}}));charts.push(new Chart($('#balanceLine'),{type:'line',data:{labels:months.map(x=>x.label),datasets:[{label:'Resultado',data:months.map(x=>x.net),borderColor:'#168A39',backgroundColor:'rgba(22,138,57,.12)',fill:true,tension:.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}}));const cats=d.expense_categories||[];charts.push(new Chart($('#balanceExpenseCat'),{type:'bar',data:{labels:cats.map(x=>x.category),datasets:[{label:'Gastos',data:cats.map(x=>x.amount),backgroundColor:'#E1262C'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}}));}
 
-async function renderFiles(){content.innerHTML=`<div class="grid-2"><div class="card"><h3>Modelo de ficha médica</h3><p class="section-note">El módulo móvil ya administra el modelo y las fichas médicas privadas. En la próxima iteración web incorporaremos carga, descarga y reemplazo desde navegador manteniendo el mismo Storage privado.</p><button class="btn primary" onclick="document.querySelector('[data-section=players]').click()">Ver jugadores</button></div><div class="card"><h3>Archivos e importaciones</h3><p class="section-note">La primera versión preserva las operaciones sensibles de importación/exportación en la app. El panel ya queda preparado para integrarlas en la siguiente actualización.</p></div></div>`;}
+async function renderFiles(){
+  const {data:template,error}=await supabase.rpc('medical_get_current_template',{});
+  if(error) throw new Error('Falta ejecutar CATALUNA_PANEL_CONTROL_Y_DOCUMENTACION.sql en Supabase.');
+
+  content.innerHTML=`
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Modelo de ficha médica</h3>
+            <div class="card-sub">Archivo que las familias pueden descargar desde DOCUMENTACIÓN Y CARNET.</div>
+          </div>
+        </div>
+
+        ${template?.storage_ref?`
+          <div class="summary-box">
+            <strong>${esc(template.file_name||'Ficha médica')}</strong>
+            <div class="card-sub">Modelo vigente</div>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button id="downloadMedicalTemplate" class="btn light">Descargar modelo actual</button>
+          </div>
+        `:`
+          <div class="empty">Todavía no hay un modelo de ficha médica cargado.</div>
+        `}
+
+        <form id="medicalTemplateForm" class="form-stack" style="margin-top:18px">
+          <label>Nuevo modelo de ficha médica
+            <input id="medicalTemplateFile" type="file" accept=".pdf,image/jpeg,image/png" required>
+          </label>
+          <button class="btn primary" type="submit">Cargar / reemplazar modelo</button>
+        </form>
+        <p class="section-note">Se guarda en Storage privado. Formatos permitidos: PDF, JPG o PNG.</p>
+      </div>
+
+      <div class="card">
+        <h3>Documentación de jugadores</h3>
+        <p class="section-note">Las familias pueden ver su carnet, descargar el modelo de ficha médica, cargar la ficha completa y consultar el archivo vigente de cada jugador.</p>
+        <button class="btn primary" onclick="document.querySelector('[data-section=players]').click()">Ver jugadores</button>
+      </div>
+    </div>
+  `;
+
+  if(template?.storage_ref){
+    $('#downloadMedicalTemplate').onclick=async()=>{
+      try{
+        const url=await getPrivateFileUrl(template.storage_ref);
+        window.open(url,'_blank','noopener');
+      }catch(ex){
+        toast(ex?.message||'No pudimos abrir el modelo.','error');
+      }
+    };
+  }
+
+  $('#medicalTemplateForm').onsubmit=async e=>{
+    e.preventDefault();
+    const input=$('#medicalTemplateFile');
+    const file=input?.files?.[0];
+    if(!file){toast('Seleccioná un archivo.','error');return;}
+
+    const allowed=['application/pdf','image/jpeg','image/png'];
+    if(!allowed.includes(file.type)){
+      toast('El archivo debe ser PDF, JPG o PNG.','error');
+      return;
+    }
+
+    const btn=e.currentTarget.querySelector('button[type="submit"]');
+    btn.disabled=true;
+    const oldText=btn.textContent;
+    btn.textContent='Cargando...';
+
+    try{
+      const clean=String(file.name||'ficha-medica')
+        .replace(/[^a-zA-Z0-9._-]+/g,'_')
+        .replace(/_+/g,'_');
+      const path=`templates/${Date.now()}-${clean}`;
+      const upload=await supabase.storage
+        .from('medical-files')
+        .upload(path,file,{contentType:file.type,upsert:false});
+
+      if(upload.error) throw upload.error;
+
+      const storageRef=`storage://medical-files/${path}`;
+      const saved=await supabase.rpc('admin_medical_save_template',{
+        p_storage_ref:storageRef,
+        p_file_name:file.name||'Ficha médica',
+        p_mime_type:file.type||'application/octet-stream'
+      });
+
+      if(saved.error) throw saved.error;
+      toast('Modelo de ficha médica actualizado.');
+      await renderFiles();
+    }catch(ex){
+      console.error('MEDICAL TEMPLATE UPLOAD ERROR:',ex);
+      toast(ex?.message||'No pudimos cargar el modelo.','error');
+    }finally{
+      if(btn?.isConnected){
+        btn.disabled=false;
+        btn.textContent=oldText;
+      }
+    }
+  };
+}
 
 (async function boot(){
   try{ if(await verifyAdmin()) await showApp(); else { await supabase.auth.signOut(); loginView.classList.remove('hidden'); appView.classList.add('hidden'); } }
