@@ -7,6 +7,7 @@ export function createRegistration2027Module(deps){
     if(method==='cash') return 'EFECTIVO';
     if(method==='card_3_installments') return 'TARJETA · 3 CUOTAS';
     if(method==='transfer') return 'TRANSFERENCIA';
+    if(method==='pending_admin') return 'A DEFINIR EN ADMINISTRACIÓN';
     return method||'-';
   }
 
@@ -15,18 +16,26 @@ export function createRegistration2027Module(deps){
     if(s==='paid') return statusBadge('PAGADO','green');
     if(s==='proof_review') return statusBadge('PAGO A REVISAR','amber');
     if(s==='pending_cash') return statusBadge('PENDIENTE EFECTIVO','gray');
+    if(s==='pending_payment') return statusBadge('PAGO PENDIENTE','amber');
     if(s==='rejected') return statusBadge('RECHAZADO','red');
     return statusBadge(s||'SIN ESTADO','gray');
   }
 
   async function render(search='',statusFilter='all'){
-    const {data,error}=await supabase.rpc('admin_registration_2027_list',{});
-    if(error) throw new Error('Falta ejecutar CATALUNA_INSCRIPCION_2027.sql en Supabase.');
+    const [listResult,settingsResult]=await Promise.all([
+      supabase.rpc('admin_registration_2027_list',{}),
+      supabase.rpc('admin_registration_2027_get_settings',{})
+    ]);
+    if(listResult.error) throw new Error('Falta ejecutar la actualización SQL de INSCRIPCIÓN 2027 en Supabase.');
+    if(settingsResult.error) throw settingsResult.error;
 
-    const all=Array.isArray(data)?data:[];
+    const all=Array.isArray(listResult.data)?listResult.data:[];
+    const settings=settingsResult.data||{};
     const q=String(search||'').trim().toLowerCase();
+    const pendingStatuses=new Set(['pending_payment','pending_cash']);
     const rows=all.filter(row=>{
-      if(statusFilter!=='all' && row.payment_status!==statusFilter) return false;
+      if(statusFilter==='pending' && !pendingStatuses.has(row.payment_status)) return false;
+      if(statusFilter!=='all' && statusFilter!=='pending' && row.payment_status!==statusFilter) return false;
       if(!q) return true;
       const text=[
         row.student_last_name,row.student_first_name,row.student_dni,row.shirt_size,
@@ -37,23 +46,50 @@ export function createRegistration2027Module(deps){
     });
 
     const review=all.filter(r=>r.payment_status==='proof_review').length;
-    const cash=all.filter(r=>r.payment_status==='pending_cash').length;
+    const pending=all.filter(r=>pendingStatuses.has(r.payment_status)).length;
     const paid=all.filter(r=>r.payment_status==='paid').length;
+    const sizes=Array.isArray(settings.shirt_sizes)?settings.shirt_sizes:[];
 
     content.innerHTML=
-      '<div class="hero"><div><h2>Inscripción 2027</h2><p>Listado de inscriptos, talles, comprobantes y estado de pago.</p></div><div class="hero-badge">TEMPORADA 2027</div></div>'+
+      '<div class="hero"><div><h2>Inscripción 2027</h2><p>Listado de inscriptos, talles y estado de pago.</p></div><div class="hero-badge">TEMPORADA 2027</div></div>'+
+      '<div class="card" style="margin-bottom:18px">'+
+        '<div class="card-head"><div><h3>Configuración de Inscripción 2027</h3><div class="card-sub">Estos datos se muestran en la app del Adulto Responsable.</div></div></div>'+
+        '<form id="registrationSettingsForm" class="form-grid">'+
+          '<label class="span-2">Talles disponibles'+
+            '<textarea name="shirt_sizes" rows="3" placeholder="Ej. 6, 8, 10, 12, 14, S, M, L">'+esc(sizes.join(', '))+'</textarea>'+
+            '<span class="section-note">Separalos por coma o por línea. En la app aparecerán como lista desplegable.</span>'+
+          '</label>'+
+          '<label>WhatsApp de Administración'+
+            '<input name="whatsapp_number" placeholder="Ej. 54911..." value="'+esc(settings.whatsapp_number||'')+'">'+
+          '</label>'+
+          '<label>Importe de inscripción (opcional)'+
+            '<input name="registration_amount" type="number" min="0" step="0.01" value="'+esc(settings.registration_amount??0)+'">'+
+          '</label>'+
+          '<label class="span-2">Horarios de Administración'+
+            '<textarea name="admin_hours" rows="3" placeholder="Ej. Lunes a viernes de 17:00 a 20:00">'+esc(settings.admin_hours||'')+'</textarea>'+
+          '</label>'+
+          '<label class="span-2">Link de tabla de talles'+
+            '<input name="size_chart_url" placeholder="https://..." value="'+esc(settings.size_chart_url||'')+'">'+
+          '</label>'+
+          '<label class="span-2">Link de imagen / miniatura de camiseta'+
+            '<input name="shirt_preview_url" placeholder="https://..." value="'+esc(settings.shirt_preview_url||'')+'">'+
+          '</label>'+
+          '<div class="form-actions span-2"><button class="btn primary" type="submit">Guardar configuración</button></div>'+
+        '</form>'+
+        '<p class="section-note" style="margin-bottom:0">Los datos bancarios que verá la familia se toman de la configuración de pagos ya cargada en Conceptos.</p>'+
+      '</div>'+
       '<div class="metrics">'+
         '<div class="metric brand"><div class="label">Total inscriptos</div><div class="value">'+all.length+'</div><div class="sub">Jugadores confirmados</div></div>'+
-        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Tarjeta o transferencia</div></div>'+
-        '<div class="metric"><div class="label">Pendientes en efectivo</div><div class="value">'+cash+'</div><div class="sub">A confirmar por administración</div></div>'+
+        '<div class="metric"><div class="label">Pendientes de pago</div><div class="value">'+pending+'</div><div class="sub">A cobrar por Administración</div></div>'+
+        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Inscripciones anteriores con comprobante</div></div>'+
         '<div class="metric green"><div class="label">Pagados</div><div class="value">'+paid+'</div><div class="sub">Pago confirmado</div></div>'+
       '</div>'+
       '<div class="toolbar">'+
         '<input id="registrationSearch" class="grow" placeholder="Buscar por jugador, DNI, equipo o talle" value="'+esc(search)+'">'+
         '<select id="registrationStatusFilter" style="max-width:230px">'+
           '<option value="all" '+(statusFilter==='all'?'selected':'')+'>Todos los estados</option>'+
+          '<option value="pending" '+(statusFilter==='pending'?'selected':'')+'>Pendientes de pago</option>'+
           '<option value="proof_review" '+(statusFilter==='proof_review'?'selected':'')+'>Pagos a revisar</option>'+
-          '<option value="pending_cash" '+(statusFilter==='pending_cash'?'selected':'')+'>Pendientes efectivo</option>'+
           '<option value="paid" '+(statusFilter==='paid'?'selected':'')+'>Pagados</option>'+
           '<option value="rejected" '+(statusFilter==='rejected'?'selected':'')+'>Rechazados</option>'+
         '</select>'+
@@ -80,6 +116,24 @@ export function createRegistration2027Module(deps){
         '</tr>';
       }).join(''):'<tr><td colspan="8"><div class="empty">No hay inscripciones que coincidan con el filtro.</div></td></tr>')+
       '</tbody></table></div>';
+
+    $('#registrationSettingsForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.currentTarget);
+      const rawSizes=String(fd.get('shirt_sizes')||'');
+      const parsedSizes=[...new Set(rawSizes.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean))];
+      const {error}=await supabase.rpc('admin_registration_2027_save_settings',{
+        p_registration_amount:Number(fd.get('registration_amount')||0),
+        p_size_chart_url:String(fd.get('size_chart_url')||'').trim(),
+        p_shirt_preview_url:String(fd.get('shirt_preview_url')||'').trim(),
+        p_shirt_sizes:parsedSizes,
+        p_whatsapp_number:String(fd.get('whatsapp_number')||'').trim(),
+        p_admin_hours:String(fd.get('admin_hours')||'').trim()
+      });
+      if(error){toast(error.message||'No pudimos guardar la configuración.','error');return;}
+      toast('Configuración de Inscripción 2027 guardada.');
+      await render(search,statusFilter);
+    };
 
     let timer;
     $('#registrationSearch').oninput=e=>{
@@ -109,11 +163,17 @@ export function createRegistration2027Module(deps){
 
   function paymentModal(row){
     const name=[row.student_last_name,row.student_first_name].filter(Boolean).join(' ');
+    const currentMethod=['cash','card_3_installments','transfer'].includes(String(row.payment_method||''))?row.payment_method:'cash';
     openModal('Cargar pago · Inscripción 2027',
       '<form id="registrationPaymentForm" class="form-grid">'+
-      '<div class="span-2 card" style="box-shadow:none"><strong>'+esc(name)+'</strong><div class="card-sub">'+esc(methodLabel(row.payment_method))+' · '+esc(row.shirt_size||'Sin talle')+'</div></div>'+
+      '<div class="span-2 card" style="box-shadow:none"><strong>'+esc(name)+'</strong><div class="card-sub">'+esc(row.shirt_size||'Sin talle')+'</div></div>'+
+      '<label>Medio de pago<select name="method">'+
+        '<option value="cash" '+(currentMethod==='cash'?'selected':'')+'>Efectivo</option>'+
+        '<option value="card_3_installments" '+(currentMethod==='card_3_installments'?'selected':'')+'>Tarjeta · 3 cuotas sin interés</option>'+
+        '<option value="transfer" '+(currentMethod==='transfer'?'selected':'')+'>Transferencia</option>'+
+      '</select></label>'+
       '<label>Importe abonado<input name="amount" type="number" min="0" step="0.01" placeholder="Opcional" value="'+(row.payment_amount??'')+'"></label>'+
-      '<label class="span-2">Observación<textarea name="note" rows="3" placeholder="Ej. Pago recibido en efectivo / comprobante aprobado">'+esc(row.admin_note||'')+'</textarea></label>'+
+      '<label class="span-2">Observación<textarea name="note" rows="3" placeholder="Ej. Pago recibido en Administración">'+esc(row.admin_note||'')+'</textarea></label>'+
       '<div class="form-actions span-2"><button type="button" class="btn light" id="cancelRegistrationPayment">Cancelar</button><button class="btn green" type="submit">CONFIRMAR PAGO</button></div></form>'
     );
     $('#cancelRegistrationPayment').onclick=closeModal;
@@ -124,7 +184,8 @@ export function createRegistration2027Module(deps){
       const {error}=await supabase.rpc('admin_registration_2027_register_payment',{
         p_registration_id:row.registration_id,
         p_amount:raw===''?null:Number(raw),
-        p_note:String(fd.get('note')||'').trim()||null
+        p_note:String(fd.get('note')||'').trim()||null,
+        p_payment_method:String(fd.get('method')||'cash')
       });
       if(error){toast(error.message||'No pudimos registrar el pago.','error');return;}
       closeModal();toast('Pago de Inscripción 2027 registrado.');await render();
