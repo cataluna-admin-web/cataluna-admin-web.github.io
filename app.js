@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import Chart from 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm';
-import { createRegistration2027Module } from './registration-2027.js?v=20261009-1';
+import { createRegistration2027Module } from './registration-2027.js?v=20261015-2';
 
 const SUPABASE_URL = 'https://vhemodjxrtjahnpplsyp.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_wIPCLQsZsHeJW1aNpEOabw_JMxkYzLM';
