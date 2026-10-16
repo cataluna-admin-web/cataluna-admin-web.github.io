@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import Chart from 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm';
-import { createRegistration2027Module } from './registration-2027.js?v=20261015-2';
+import { createRegistration2027Module } from './registration-2027.js?v=20261015-2';\nimport { createControlPanelModule } from './control-panel.js?v=20261015-1';
 
 const SUPABASE_URL = 'https://vhemodjxrtjahnpplsyp.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_wIPCLQsZsHeJW1aNpEOabw_JMxkYzLM';
@@ -26,7 +26,7 @@ const sectionTitles = {
   dashboard:'Dashboard', players:'Jugadores', teams:'Equipos', matches:'Partidos',
   attendance:'Asistencia', citations:'Citaciones', commitment:'Compromiso', users:'Usuarios',
   leagues:'Ligas', news:'Novedades', sponsors:'Sponsors', benefits:'Beneficios',
-  registration2027:'Inscripción 2027', payments:'Pagos', concepts:'Conceptos', expenses:'Gastos', balances:'Balances', files:'Archivos'
+  controlPanel:'Panel de control', registration2027:'Inscripción 2027', payments:'Pagos', concepts:'Conceptos', expenses:'Gastos', balances:'Balances', files:'Archivos'
 };
 
 function friendlyErrorText(message) {
@@ -130,7 +130,7 @@ function activeStatus(row){
 }
 function openModal(title, html){ $('#modalTitle').textContent=title; $('#modalBody').innerHTML=html; $('#modalBackdrop').classList.remove('hidden'); }
 function closeModal(){ $('#modalBackdrop').classList.add('hidden'); $('#modalBody').innerHTML=''; }
-const registration2027Module=createRegistration2027Module({supabase,content,$,$$:$$,esc,statusBadge,openPaymentProof,openModal,closeModal,toast});
+const registration2027Module=createRegistration2027Module({supabase,content,$,$:$,esc,statusBadge,openPaymentProof,openModal,closeModal,toast});\nconst controlPanelModule=createControlPanelModule({supabase,content,$,$:$,esc,toast});
 async function renderRegistration2027(search='',statusFilter='all'){return registration2027Module.render(search,statusFilter);}
 $('#modalClose').onclick=closeModal;
 $('#modalBackdrop').addEventListener('click',e=>{ if(e.target.id==='modalBackdrop') closeModal(); });
@@ -195,7 +195,7 @@ async function navigate(section){
   $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.section===section));
   titleEl.textContent=sectionTitles[section]||section; eyebrowEl.textContent='CATALUÑA · ADMIN WEB'; loading();
   try{
-    const fn={dashboard:renderDashboard,players:renderPlayers,teams:renderTeams,matches:renderMatches,attendance:renderAttendance,citations:renderCitations,commitment:renderCommitment,users:renderUsers,leagues:renderLeagues,news:renderNews,sponsors:renderSponsors,benefits:renderBenefits,registration2027:renderRegistration2027,payments:renderPayments,concepts:renderConcepts,expenses:renderExpenses,balances:renderBalances,files:renderFiles}[section];
+    const fn={dashboard:renderDashboard,players:renderPlayers,teams:renderTeams,matches:renderMatches,attendance:renderAttendance,citations:renderCitations,commitment:renderCommitment,users:renderUsers,leagues:renderLeagues,news:renderNews,sponsors:renderSponsors,benefits:renderBenefits,controlPanel:()=>controlPanelModule.render(),registration2027:renderRegistration2027,payments:renderPayments,concepts:renderConcepts,expenses:renderExpenses,balances:renderBalances,files:renderFiles}[section];
     await (fn||renderDashboard)(); setUpdated();
   }catch(ex){ console.error(ex); content.innerHTML=`<div class="card"><h3>No pudimos cargar esta sección</h3><p class="section-note">${esc(ex.message||ex)}</p></div>`; }
 }
