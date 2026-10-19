@@ -48,48 +48,11 @@ export function createRegistration2027Module(deps){
     const review=all.filter(r=>r.payment_status==='proof_review').length;
     const pending=all.filter(r=>pendingStatuses.has(r.payment_status)).length;
     const paid=all.filter(r=>r.payment_status==='paid').length;
-    const sizes=Array.isArray(settings.shirt_sizes)?settings.shirt_sizes:[];
 
     content.innerHTML=
       '<div class="hero"><div><h2>Inscripción 2027</h2><p>Listado de inscriptos, talles y estado de pago.</p></div><div class="hero-badge">TEMPORADA 2027</div></div>'+
-      '<div class="card" style="margin-bottom:18px">'+
-        '<div class="card-head"><div><h3>Configuración de Inscripción 2027</h3><div class="card-sub">Estos datos se muestran en la app del Adulto Responsable.</div></div></div>'+
-        '<form id="registrationSettingsForm" class="form-grid">'+
-          '<label class="span-2">Talles disponibles'+
-            '<textarea name="shirt_sizes" rows="3" placeholder="Ej. 6, 8, 10, 12, 14, S, M, L">'+esc(sizes.join(', '))+'</textarea>'+
-            '<span class="section-note">Separalos por coma o por línea. En la app aparecerán como lista desplegable.</span>'+
-          '</label>'+
-          '<label>WhatsApp de Administración'+
-            '<input name="whatsapp_number" placeholder="Ej. 54911..." value="'+esc(settings.whatsapp_number||'')+'">'+
-          '</label>'+
-          '<label>Importe por transferencia'+
-            '<input name="transfer_amount" type="number" min="0" step="0.01" value="'+esc(settings.transfer_amount??0)+'">'+
-          '</label>'+
-          '<label>Importe en efectivo'+
-            '<input name="cash_amount" type="number" min="0" step="0.01" value="'+esc(settings.cash_amount??0)+'">'+
-          '</label>'+
-          '<label>Importe con tarjeta de crédito'+
-            '<input name="card_amount" type="number" min="0" step="0.01" value="'+esc(settings.card_amount??0)+'">'+
-          '</label>'+
-          '<label class="span-2">Horarios de Administración'+
-            '<textarea name="admin_hours" rows="3" placeholder="Ej. Lunes a viernes de 17:00 a 20:00">'+esc(settings.admin_hours||'')+'</textarea>'+
-          '</label>'+
-          '<label class="span-2">Link de tabla de talles'+
-            '<input name="size_chart_url" placeholder="https://..." value="'+esc(settings.size_chart_url||'')+'">'+
-          '</label>'+
-          '<label class="span-2">Link de imagen / miniatura de camiseta'+
-            '<input name="shirt_preview_url" placeholder="https://..." value="'+esc(settings.shirt_preview_url||'')+'">'+
-          '</label>'+
-          '<div class="form-actions span-2"><button class="btn primary" type="submit">Guardar configuración</button></div>'+
-        '</form>'+
-        '<p class="section-note" style="margin-bottom:0">Los datos bancarios que verá la familia se toman de la configuración de pagos ya cargada en Conceptos.</p>'+
-      '</div>'+
-      '<div class="metrics">'+
-        '<div class="metric brand"><div class="label">Total inscriptos</div><div class="value">'+all.length+'</div><div class="sub">Jugadores confirmados</div></div>'+
-        '<div class="metric"><div class="label">Pendientes de pago</div><div class="value">'+pending+'</div><div class="sub">A cobrar por Administración</div></div>'+
-        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Inscripciones anteriores con comprobante</div></div>'+
-        '<div class="metric green"><div class="label">Pagados</div><div class="value">'+paid+'</div><div class="sub">Pago confirmado</div></div>'+
-      '</div>'+
+
+
       '<div class="toolbar">'+
         '<input id="registrationSearch" class="grow" placeholder="Buscar por jugador, DNI, equipo o talle" value="'+esc(search)+'">'+
         '<select id="registrationStatusFilter" style="max-width:230px">'+
@@ -99,6 +62,7 @@ export function createRegistration2027Module(deps){
           '<option value="paid" '+(statusFilter==='paid'?'selected':'')+'>Pagados</option>'+
           '<option value="rejected" '+(statusFilter==='rejected'?'selected':'')+'>Rechazados</option>'+
         '</select>'+
+        '<button id="registrationSettingsButton" class="btn light" type="button">⚙ CONFIGURACIÓN DE INSCRIPCIÓN</button>'+
       '</div>'+
       '<div class="table-wrap"><table class="data-table"><thead><tr>'+
         '<th>Jugador</th><th>DNI</th><th>Equipo/s</th><th>Talle</th><th>Medio de pago</th><th>Estado</th><th>Inscripción</th><th>Acciones</th>'+
@@ -121,27 +85,16 @@ export function createRegistration2027Module(deps){
           '<td><div class="actions">'+actions+'</div></td>'+
         '</tr>';
       }).join(''):'<tr><td colspan="8"><div class="empty">No hay inscripciones que coincidan con el filtro.</div></td></tr>')+
-      '</tbody></table></div>';
+      '</tbody></table></div>'+
+      '<div class="metrics">'+
+        '<div class="metric brand"><div class="label">Total inscriptos</div><div class="value">'+all.length+'</div><div class="sub">Jugadores confirmados</div></div>'+
+        '<div class="metric"><div class="label">Pendientes de pago</div><div class="value">'+pending+'</div><div class="sub">A cobrar por Administración</div></div>'+
+        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Inscripciones anteriores con comprobante</div></div>'+
+        '<div class="metric green"><div class="label">Pagados</div><div class="value">'+paid+'</div><div class="sub">Pago confirmado</div></div>'+
+      '</div>'+
+      '';
 
-    $('#registrationSettingsForm').onsubmit=async e=>{
-      e.preventDefault();
-      const fd=new FormData(e.currentTarget);
-      const rawSizes=String(fd.get('shirt_sizes')||'');
-      const parsedSizes=[...new Set(rawSizes.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean))];
-      const {error}=await supabase.rpc('admin_registration_2027_save_settings',{
-        p_transfer_amount:Number(fd.get('transfer_amount')||0),
-        p_cash_amount:Number(fd.get('cash_amount')||0),
-        p_card_amount:Number(fd.get('card_amount')||0),
-        p_size_chart_url:String(fd.get('size_chart_url')||'').trim(),
-        p_shirt_preview_url:String(fd.get('shirt_preview_url')||'').trim(),
-        p_shirt_sizes:parsedSizes,
-        p_whatsapp_number:String(fd.get('whatsapp_number')||'').trim(),
-        p_admin_hours:String(fd.get('admin_hours')||'').trim()
-      });
-      if(error){toast(error.message||'No pudimos guardar la configuración.','error');return;}
-      toast('Configuración de Inscripción 2027 guardada.');
-      await render(search,statusFilter);
-    };
+    $('#registrationSettingsButton').onclick=()=>settingsModal(settings,search,statusFilter);
 
     let timer;
     $('#registrationSearch').oninput=e=>{
@@ -167,6 +120,63 @@ export function createRegistration2027Module(deps){
       const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
       if(row) rejectModal(row);
     });
+  }
+
+  function settingsModal(settings,search='',statusFilter='all'){
+    const sizes=Array.isArray(settings.shirt_sizes)?settings.shirt_sizes:[];
+    openModal('Configuración de Inscripción 2027',
+      '<form id="registrationSettingsForm" class="form-grid">'+
+        '<label class="span-2">Talles disponibles'+
+          '<textarea name="shirt_sizes" rows="3" placeholder="Ej. 6, 8, 10, 12, 14, S, M, L">'+esc(sizes.join(', '))+'</textarea>'+
+          '<span class="section-note">Separalos por coma o por línea. En la app aparecerán como lista desplegable.</span>'+
+        '</label>'+
+        '<label>WhatsApp de Administración'+
+          '<input name="whatsapp_number" placeholder="Ej. 54911..." value="'+esc(settings.whatsapp_number||'')+'">'+
+        '</label>'+
+        '<label>Importe por transferencia'+
+          '<input name="transfer_amount" type="number" min="0" step="0.01" value="'+esc(settings.transfer_amount??0)+'">'+
+        '</label>'+
+        '<label>Importe en efectivo'+
+          '<input name="cash_amount" type="number" min="0" step="0.01" value="'+esc(settings.cash_amount??0)+'">'+
+        '</label>'+
+        '<label>Importe con tarjeta de crédito'+
+          '<input name="card_amount" type="number" min="0" step="0.01" value="'+esc(settings.card_amount??0)+'">'+
+        '</label>'+
+        '<label class="span-2">Horarios de Administración'+
+          '<textarea name="admin_hours" rows="3" placeholder="Ej. Lunes a viernes de 17:00 a 20:00">'+esc(settings.admin_hours||'')+'</textarea>'+
+        '</label>'+
+        '<label class="span-2">Link de tabla de talles'+
+          '<input name="size_chart_url" placeholder="https://..." value="'+esc(settings.size_chart_url||'')+'">'+
+        '</label>'+
+        '<label class="span-2">Link de imagen / miniatura de camiseta'+
+          '<input name="shirt_preview_url" placeholder="https://..." value="'+esc(settings.shirt_preview_url||'')+'">'+
+        '</label>'+
+        '<p class="section-note span-2" style="margin:0">Los datos bancarios que verá la familia se toman de la configuración de pagos ya cargada en Conceptos.</p>'+
+        '<div class="form-actions span-2"><button type="button" class="btn light" id="cancelRegistrationSettings">Cancelar</button><button class="btn primary" type="submit">GUARDAR CONFIGURACIÓN</button></div>'+
+      '</form>'
+    );
+
+    $('#cancelRegistrationSettings').onclick=closeModal;
+    $('#registrationSettingsForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.currentTarget);
+      const rawSizes=String(fd.get('shirt_sizes')||'');
+      const parsedSizes=[...new Set(rawSizes.split(/[\\n,;]+/).map(v=>v.trim()).filter(Boolean))];
+      const {error}=await supabase.rpc('admin_registration_2027_save_settings',{
+        p_transfer_amount:Number(fd.get('transfer_amount')||0),
+        p_cash_amount:Number(fd.get('cash_amount')||0),
+        p_card_amount:Number(fd.get('card_amount')||0),
+        p_size_chart_url:String(fd.get('size_chart_url')||'').trim(),
+        p_shirt_preview_url:String(fd.get('shirt_preview_url')||'').trim(),
+        p_shirt_sizes:parsedSizes,
+        p_whatsapp_number:String(fd.get('whatsapp_number')||'').trim(),
+        p_admin_hours:String(fd.get('admin_hours')||'').trim()
+      });
+      if(error){toast(error.message||'No pudimos guardar la configuración.','error');return;}
+      closeModal();
+      toast('Configuración de Inscripción 2027 guardada.');
+      await render(search,statusFilter);
+    };
   }
 
   function paymentModal(row){
