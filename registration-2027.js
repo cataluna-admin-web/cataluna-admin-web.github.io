@@ -62,8 +62,11 @@ export function createRegistration2027Module(deps){
           '<label>WhatsApp de Administración'+
             '<input name="whatsapp_number" placeholder="Ej. 54911..." value="'+esc(settings.whatsapp_number||'')+'">'+
           '</label>'+
-          '<label>Importe de inscripción (opcional)'+
-            '<input name="registration_amount" type="number" min="0" step="0.01" value="'+esc(settings.registration_amount??0)+'">'+
+          '<label>Importe por transferencia'+
+            '<input name="transfer_amount" type="number" min="0" step="0.01" value="'+esc(settings.transfer_amount??0)+'">'+
+          '</label>'+
+          '<label>Importe en efectivo'+
+            '<input name="cash_amount" type="number" min="0" step="0.01" value="'+esc(settings.cash_amount??0)+'">'+
           '</label>'+
           '<label class="span-2">Horarios de Administración'+
             '<textarea name="admin_hours" rows="3" placeholder="Ej. Lunes a viernes de 17:00 a 20:00">'+esc(settings.admin_hours||'')+'</textarea>'+
@@ -123,7 +126,8 @@ export function createRegistration2027Module(deps){
       const rawSizes=String(fd.get('shirt_sizes')||'');
       const parsedSizes=[...new Set(rawSizes.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean))];
       const {error}=await supabase.rpc('admin_registration_2027_save_settings',{
-        p_registration_amount:Number(fd.get('registration_amount')||0),
+        p_transfer_amount:Number(fd.get('transfer_amount')||0),
+        p_cash_amount:Number(fd.get('cash_amount')||0),
         p_size_chart_url:String(fd.get('size_chart_url')||'').trim(),
         p_shirt_preview_url:String(fd.get('shirt_preview_url')||'').trim(),
         p_shirt_sizes:parsedSizes,
