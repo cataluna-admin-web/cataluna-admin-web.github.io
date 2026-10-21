@@ -26,7 +26,7 @@ export function createRegistration2027Module(deps){
       supabase.rpc('admin_registration_2027_list',{}),
       supabase.rpc('admin_registration_2027_get_settings',{})
     ]);
-    if(listResult.error) throw new Error('Falta ejecutar la actualización SQL de INSCRIPCIÓN 2027 en Supabase.');
+    if(listResult.error) throw new Error('Falta ejecutar la actualización SQL de PREINSCRIPCIÓN 2027 en Supabase.');
     if(settingsResult.error) throw settingsResult.error;
 
     const all=Array.isArray(listResult.data)?listResult.data:[];
@@ -50,7 +50,7 @@ export function createRegistration2027Module(deps){
     const paid=all.filter(r=>r.payment_status==='paid').length;
 
     content.innerHTML=
-      '<div class="hero"><div><h2>Inscripción 2027</h2><p>Listado de inscriptos, talles y estado de pago.</p></div><div class="hero-badge">TEMPORADA 2027</div></div>'+
+      '<div class="hero"><div><h2>Preinscripción 2027</h2><p>Listado de preinscriptos, talles y estado de pago.</p></div><div class="hero-badge">TEMPORADA 2027</div></div>'+
 
 
       '<div class="toolbar">'+
@@ -62,10 +62,10 @@ export function createRegistration2027Module(deps){
           '<option value="paid" '+(statusFilter==='paid'?'selected':'')+'>Pagados</option>'+
           '<option value="rejected" '+(statusFilter==='rejected'?'selected':'')+'>Rechazados</option>'+
         '</select>'+
-        '<button id="registrationSettingsButton" class="btn light" type="button">⚙ CONFIGURACIÓN DE INSCRIPCIÓN</button>'+
+        '<button id="registrationSettingsButton" class="btn light" type="button">⚙ CONFIGURACIÓN DE PREINSCRIPCIÓN</button>'+
       '</div>'+
       '<div class="table-wrap"><table class="data-table"><thead><tr>'+
-        '<th>Jugador</th><th>DNI</th><th>Equipo/s</th><th>Talle</th><th>Medio de pago</th><th>Estado</th><th>Inscripción</th><th>Acciones</th>'+
+        '<th>Jugador</th><th>DNI</th><th>Equipo/s</th><th>Talle</th><th>Medio de pago</th><th>Estado</th><th>Preinscripción</th><th>Acciones</th>'+
       '</tr></thead><tbody>'+
       (rows.length?rows.map(row=>{
         const teams=Array.isArray(row.team_names)&&row.team_names.length?row.team_names.join(', '):'Sin equipo';
@@ -84,12 +84,12 @@ export function createRegistration2027Module(deps){
           '<td>'+(row.registered_at?new Date(row.registered_at).toLocaleString('es-AR'):'-')+'</td>'+
           '<td><div class="actions">'+actions+'</div></td>'+
         '</tr>';
-      }).join(''):'<tr><td colspan="8"><div class="empty">No hay inscripciones que coincidan con el filtro.</div></td></tr>')+
+      }).join(''):'<tr><td colspan="8"><div class="empty">No hay preinscripciones que coincidan con el filtro.</div></td></tr>')+
       '</tbody></table></div>'+
       '<div class="metrics">'+
-        '<div class="metric brand"><div class="label">Total inscriptos</div><div class="value">'+all.length+'</div><div class="sub">Jugadores confirmados</div></div>'+
+        '<div class="metric brand"><div class="label">Total preinscriptos</div><div class="value">'+all.length+'</div><div class="sub">Preinscripciones activas</div></div>'+
         '<div class="metric"><div class="label">Pendientes de pago</div><div class="value">'+pending+'</div><div class="sub">A cobrar por Administración</div></div>'+
-        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Inscripciones anteriores con comprobante</div></div>'+
+        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Preinscripciones con comprobante</div></div>'+
         '<div class="metric green"><div class="label">Pagados</div><div class="value">'+paid+'</div><div class="sub">Pago confirmado</div></div>'+
       '</div>'+
       '';
@@ -108,7 +108,7 @@ export function createRegistration2027Module(deps){
       if(row) openPaymentProof({
         storage_ref:row.proof_storage_ref,
         proof_path:row.proof_storage_ref,
-        file_name:row.proof_file_name||'Comprobante inscripción 2027',
+        file_name:row.proof_file_name||'Comprobante preinscripción 2027',
         mime_type:row.proof_mime_type||''
       });
     });
@@ -124,7 +124,7 @@ export function createRegistration2027Module(deps){
 
   function settingsModal(settings,search='',statusFilter='all'){
     const sizes=Array.isArray(settings.shirt_sizes)?settings.shirt_sizes:[];
-    openModal('Configuración de Inscripción 2027',
+    openModal('Configuración de Preinscripción 2027',
       '<form id="registrationSettingsForm" class="form-grid">'+
         '<label class="span-2">Talles disponibles'+
           '<textarea name="shirt_sizes" rows="3" placeholder="Ej. 6, 8, 10, 12, 14, S, M, L">'+esc(sizes.join(', '))+'</textarea>'+
@@ -174,7 +174,7 @@ export function createRegistration2027Module(deps){
       });
       if(error){toast(error.message||'No pudimos guardar la configuración.','error');return;}
       closeModal();
-      toast('Configuración de Inscripción 2027 guardada.');
+      toast('Configuración de Preinscripción 2027 guardada.');
       await render(search,statusFilter);
     };
   }
@@ -182,7 +182,7 @@ export function createRegistration2027Module(deps){
   function paymentModal(row){
     const name=[row.student_last_name,row.student_first_name].filter(Boolean).join(' ');
     const currentMethod=['cash','card_3_installments','transfer'].includes(String(row.payment_method||''))?row.payment_method:'cash';
-    openModal('Cargar pago · Inscripción 2027',
+    openModal('Cargar pago · Preinscripción 2027',
       '<form id="registrationPaymentForm" class="form-grid">'+
       '<div class="span-2 card" style="box-shadow:none"><strong>'+esc(name)+'</strong><div class="card-sub">'+esc(row.shirt_size||'Sin talle')+'</div></div>'+
       '<label>Medio de pago<select name="method">'+
@@ -206,7 +206,7 @@ export function createRegistration2027Module(deps){
         p_payment_method:String(fd.get('method')||'cash')
       });
       if(error){toast(error.message||'No pudimos registrar el pago.','error');return;}
-      closeModal();toast('Pago de Inscripción 2027 registrado.');await render();
+      closeModal();toast('Pago de Preinscripción 2027 registrado.');await render();
     };
   }
 
