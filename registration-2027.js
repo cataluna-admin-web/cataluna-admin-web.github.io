@@ -72,7 +72,8 @@ export function createRegistration2027Module(deps){
         const actions=[
           row.proof_storage_ref?'<button class="btn light small registration-proof" data-id="'+row.registration_id+'">Ver comprobante</button>':'',
           row.payment_status!=='paid'?'<button class="btn green small registration-pay" data-id="'+row.registration_id+'">CARGAR PAGO</button>':'',
-          row.payment_status==='proof_review'?'<button class="btn danger small registration-reject" data-id="'+row.registration_id+'">Rechazar</button>':''
+          row.payment_status==='proof_review'?'<button class="btn danger small registration-reject" data-id="'+row.registration_id+'">RECHAZAR PAGO</button>':'',
+          '<button class="btn danger small registration-cancel" data-id="'+row.registration_id+'">CANCELAR PREINSCRIPCIÓN</button>'
         ].join('');
         return '<tr>'+
           '<td class="name-cell">'+esc(row.student_last_name||'')+' '+esc(row.student_first_name||'')+'</td>'+
@@ -116,9 +117,13 @@ export function createRegistration2027Module(deps){
       const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
       if(row) paymentModal(row);
     });
-    $$('.registration-reject').forEach(btn=>btn.onclick=()=>{
+    $('.registration-reject').forEach(btn=>btn.onclick=()=>{
       const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
       if(row) rejectModal(row);
+    });
+    $('.registration-cancel').forEach(btn=>btn.onclick=()=>{
+      const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
+      if(row) cancelModal(row);
     });
   }
 
@@ -212,21 +217,61 @@ export function createRegistration2027Module(deps){
 
   function rejectModal(row){
     const name=[row.student_last_name,row.student_first_name].filter(Boolean).join(' ');
-    openModal('Rechazar comprobante',
+    openModal('Rechazar pago y cancelar preinscripción',
       '<form id="registrationRejectForm" class="form-stack"><p>Jugador: <strong>'+esc(name)+'</strong></p>'+
+      '<p class="section-note">Al rechazar el pago se cancelará la preinscripción activa y el jugador podrá volver a preinscribirse.</p>'+
       '<label>Motivo / observación<textarea name="note" rows="4" placeholder="Ej. El comprobante no corresponde al importe abonado"></textarea></label>'+
-      '<div class="form-actions"><button type="button" class="btn light" id="cancelRegistrationReject">Cancelar</button><button class="btn danger" type="submit">RECHAZAR PAGO</button></div></form>'
+      '<div class="form-actions"><button type="button" class="btn light" id="cancelRegistrationReject">Volver</button><button class="btn danger" type="submit">RECHAZAR Y CANCELAR</button></div></form>'
     );
     $('#cancelRegistrationReject').onclick=closeModal;
     $('#registrationRejectForm').onsubmit=async e=>{
       e.preventDefault();
       const fd=new FormData(e.currentTarget);
-      const {error}=await supabase.rpc('admin_registration_2027_reject_payment',{
+      const note=String(fd.get('note')||'').trim()||null;
+
+      const rejected=await supabase.rpc('admin_registration_2027_reject_payment',{
+        p_registration_id:row.registration_id,
+        p_note:note
+      });
+      if(rejected.error){toast(rejected.error.message||'No pudimos rechazar el pago.','error');return;}
+
+      const cancelled=await supabase.rpc('admin_registration_2027_cancel',{
+        p_registration_id:row.registration_id,
+        p_note:note?('Pago rechazado: '+note):'Pago rechazado por Administración'
+      });
+      if(cancelled.error){
+        toast(cancelled.error.message||'El pago quedó rechazado, pero no pudimos cancelar la preinscripción.','error');
+        return;
+      }
+
+      closeModal();
+      toast('Pago rechazado y preinscripción cancelada. El jugador puede volver a preinscribirse.');
+      await render();
+    };
+  }
+
+  function cancelModal(row){
+    const name=[row.student_last_name,row.student_first_name].filter(Boolean).join(' ');
+    openModal('Cancelar preinscripción 2027',
+      '<form id="registrationCancelForm" class="form-stack">'+
+      '<p>Jugador: <strong>'+esc(name)+'</strong></p>'+
+      '<p class="section-note">La preinscripción activa se cancelará. Después de hacerlo, el jugador quedará habilitado para volver a preinscribirse desde la app.</p>'+
+      '<label>Motivo / observación<textarea name="note" rows="4" placeholder="Ej. No abonó, no se acercó a Administración, desistió de la preinscripción"></textarea></label>'+
+      '<div class="form-actions"><button type="button" class="btn light" id="cancelRegistrationCancel">Volver</button><button class="btn danger" type="submit">CANCELAR PREINSCRIPCIÓN</button></div>'+
+      '</form>'
+    );
+    $('#cancelRegistrationCancel').onclick=closeModal;
+    $('#registrationCancelForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.currentTarget);
+      const {error}=await supabase.rpc('admin_registration_2027_cancel',{
         p_registration_id:row.registration_id,
         p_note:String(fd.get('note')||'').trim()||null
       });
-      if(error){toast(error.message||'No pudimos rechazar el pago.','error');return;}
-      closeModal();toast('Comprobante rechazado.');await render();
+      if(error){toast(error.message||'No pudimos cancelar la preinscripción.','error');return;}
+      closeModal();
+      toast('Preinscripción cancelada. El jugador ya puede volver a preinscribirse.');
+      await render();
     };
   }
 
