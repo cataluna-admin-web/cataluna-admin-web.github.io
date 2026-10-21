@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import Chart from 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm';
-import { createRegistration2027Module } from './registration-2027.js?v=20261019-settings-modal';
+import { createRegistration2027Module } from './registration-2027.js?v=20261020-preinscripcion';
 import { createControlPanelModule } from './control-panel.js?v=20261015-1';
 
 const SUPABASE_URL = 'https://vhemodjxrtjahnpplsyp.supabase.co';
@@ -27,7 +27,7 @@ const sectionTitles = {
   dashboard:'Dashboard', players:'Jugadores', teams:'Equipos', matches:'Partidos',
   attendance:'Asistencia', citations:'Citaciones', commitment:'Compromiso', users:'Usuarios',
   leagues:'Ligas', news:'Novedades', sponsors:'Sponsors', benefits:'Beneficios',
-  controlPanel:'Panel de control', registration2027:'Inscripción 2027', payments:'Pagos', concepts:'Conceptos', expenses:'Gastos', balances:'Balances', files:'Archivos'
+  controlPanel:'Panel de control', registration2027:'Preinscripción 2027', payments:'Pagos', concepts:'Conceptos', expenses:'Gastos', balances:'Balances', files:'Archivos'
 };
 
 function friendlyErrorText(message) {
