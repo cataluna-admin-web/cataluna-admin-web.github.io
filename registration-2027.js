@@ -72,7 +72,8 @@ export function createRegistration2027Module(deps){
         const actions=[
           row.proof_storage_ref?'<button class="btn light small registration-proof" data-id="'+row.registration_id+'">Ver comprobante</button>':'',
           row.payment_status!=='paid'?'<button class="btn green small registration-pay" data-id="'+row.registration_id+'">CARGAR PAGO</button>':'',
-          row.payment_status==='proof_review'?'<button class="btn danger small registration-reject" data-id="'+row.registration_id+'">Rechazar</button>':''
+          row.payment_status==='proof_review'?'<button class="btn danger small registration-reject" data-id="'+row.registration_id+'">RECHAZAR PAGO</button>':'',
+          row.payment_status!=='paid'?'<button class="btn danger small registration-cancel" data-id="'+row.registration_id+'">CANCELAR PREINSCRIPCIÓN</button>':''
         ].join('');
         return '<tr>'+
           '<td class="name-cell">'+esc(row.student_last_name||'')+' '+esc(row.student_first_name||'')+'</td>'+
@@ -231,6 +232,41 @@ export function createRegistration2027Module(deps){
       });
       if(error){toast(error.message||'No pudimos rechazar el pago.','error');return;}
       closeModal();toast('Comprobante rechazado.');await render();
+    };
+  }
+
+  function cancelModal(row){
+    const name=[row.student_last_name,row.student_first_name].filter(Boolean).join(' ');
+    openModal('Cancelar preinscripción 2027',
+      '<form id="registrationCancelForm" class="form-stack">'+
+      '<p>Jugador: <strong>'+esc(name)+'</strong></p>'+
+      '<p class="section-note">Al cancelar esta preinscripción, el jugador podrá volver a preinscribirse desde la app.</p>'+
+      '<label>Motivo / observación<textarea name="note" rows="4" placeholder="Ej. No abonó, no se acercó a Administración, pago rechazado"></textarea></label>'+
+      '<div class="form-actions"><button type="button" class="btn light" id="cancelRegistrationCancel">Volver</button><button class="btn danger" type="submit">CANCELAR PREINSCRIPCIÓN</button></div>'+
+      '</form>'
+    );
+    $('#cancelRegistrationCancel').onclick=closeModal;
+    $('#registrationCancelForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.currentTarget);
+      const {error}=await supabase.rpc('admin_registration_2027_cancel',{
+        p_registration_id:String(row.registration_id||''),
+        p_note:String(fd.get('note')||'').trim()||null
+      });
+      if(error){
+        const message=String(error.message||'');
+        if(message.includes('paid_registration_cannot_be_cancelled')){
+          toast('Una preinscripción con pago confirmado no se puede cancelar desde este botón.','error');
+        }else if(message.includes('registration_not_found')){
+          toast('La preinscripción ya no existe o ya fue cancelada.','error');
+        }else{
+          toast(message||'No pudimos cancelar la preinscripción.','error');
+        }
+        return;
+      }
+      closeModal();
+      toast('Preinscripción cancelada. El jugador ya puede volver a preinscribirse.');
+      await render();
     };
   }
 
