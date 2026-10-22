@@ -117,11 +117,11 @@ export function createRegistration2027Module(deps){
       const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
       if(row) paymentModal(row);
     });
-    $('.registration-reject').forEach(btn=>btn.onclick=()=>{
+    $$('.registration-reject').forEach(btn=>btn.onclick=()=>{
       const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
       if(row) rejectModal(row);
     });
-    $('.registration-cancel').forEach(btn=>btn.onclick=()=>{
+    $$('.registration-cancel').forEach(btn=>btn.onclick=()=>{
       const row=all.find(r=>String(r.registration_id)===String(btn.dataset.id));
       if(row) cancelModal(row);
     });
