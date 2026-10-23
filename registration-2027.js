@@ -1,3 +1,5 @@
+import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm';
+
 
 export function createRegistration2027Module(deps){
   const {supabase,content,$,$$,esc,statusBadge,openPaymentProof,openModal,closeModal,toast}=deps;
@@ -19,6 +21,45 @@ export function createRegistration2027Module(deps){
     if(s==='pending_payment') return statusBadge('PAGO PENDIENTE','amber');
     if(s==='rejected') return statusBadge('RECHAZADO','red');
     return statusBadge(s||'SIN ESTADO','gray');
+  }
+
+  function statusText(value){
+    const s=String(value||'');
+    if(s==='paid') return 'PAGADO';
+    if(s==='proof_review') return 'PAGO A REVISAR';
+    if(s==='pending_cash') return 'PENDIENTE EFECTIVO';
+    if(s==='pending_payment') return 'PAGO PENDIENTE';
+    if(s==='rejected') return 'RECHAZADO';
+    return s||'SIN ESTADO';
+  }
+
+  function downloadExcel(rows){
+    const data=(Array.isArray(rows)?rows:[]).map(row=>({
+      'Apellido': row.student_last_name||'',
+      'Nombre': row.student_first_name||'',
+      'DNI': row.student_dni||'',
+      'Equipo/s': Array.isArray(row.team_names)&&row.team_names.length?row.team_names.join(', '):'Sin equipo',
+      'Talle': row.shirt_size||'',
+      'Medio de pago': methodLabel(row.payment_method),
+      'Estado': statusText(row.payment_status),
+      'Fecha de preinscripción': row.registered_at?new Date(row.registered_at).toLocaleString('es-AR'):'',
+      'Adulto responsable': [row.guardian_last_name,row.guardian_first_name].filter(Boolean).join(' '),
+      'DNI adulto responsable': row.guardian_dni||'',
+      'Teléfono adulto responsable': row.guardian_phone||row.guardian_telefono||'',
+      'Email adulto responsable': row.guardian_email||'',
+      'Importe abonado': row.payment_amount??'',
+      'Observación': row.admin_note||''
+    }));
+
+    const worksheet=XLSX.utils.json_to_sheet(data);
+    worksheet['!cols']=[
+      {wch:20},{wch:20},{wch:14},{wch:34},{wch:10},{wch:26},{wch:22},
+      {wch:24},{wch:30},{wch:22},{wch:24},{wch:32},{wch:18},{wch:38}
+    ];
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,worksheet,'Preinscriptos 2027');
+    const stamp=new Date().toISOString().slice(0,10);
+    XLSX.writeFile(workbook,'Preinscriptos_Cataluna_2027_'+stamp+'.xlsx');
   }
 
   async function render(search='',statusFilter='all'){
@@ -50,9 +91,15 @@ export function createRegistration2027Module(deps){
     const paid=all.filter(r=>r.payment_status==='paid').length;
 
     content.innerHTML=
-      '<div class="hero"><div><h2>Preinscripción 2027</h2><p>Listado de preinscriptos, talles y estado de pago.</p></div><div class="hero-badge">TEMPORADA 2027</div></div>'+
+      '<div class="hero"><div><h2>Preinscripción 2027</h2><p>Listado de preinscriptos, talles y estado de pago.</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end"><div class="hero-badge">TEMPORADA 2027</div><button id="registrationExcelButton" class="btn light" type="button" style="white-space:nowrap">📊 DESCARGAR EXCEL</button></div></div>'+
 
 
+      '<div class="metrics">'+
+        '<div class="metric brand"><div class="label">Total preinscriptos</div><div class="value">'+all.length+'</div><div class="sub">Preinscripciones activas</div></div>'+
+        '<div class="metric"><div class="label">Pendientes de pago</div><div class="value">'+pending+'</div><div class="sub">A cobrar por Administración</div></div>'+
+        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Preinscripciones con comprobante</div></div>'+
+        '<div class="metric green"><div class="label">Pagados</div><div class="value">'+paid+'</div><div class="sub">Pago confirmado</div></div>'+
+      '</div>'+
       '<div class="toolbar">'+
         '<input id="registrationSearch" class="grow" placeholder="Buscar por jugador, DNI, equipo o talle" value="'+esc(search)+'">'+
         '<select id="registrationStatusFilter" style="max-width:230px">'+
@@ -87,14 +134,9 @@ export function createRegistration2027Module(deps){
         '</tr>';
       }).join(''):'<tr><td colspan="8"><div class="empty">No hay preinscripciones que coincidan con el filtro.</div></td></tr>')+
       '</tbody></table></div>'+
-      '<div class="metrics">'+
-        '<div class="metric brand"><div class="label">Total preinscriptos</div><div class="value">'+all.length+'</div><div class="sub">Preinscripciones activas</div></div>'+
-        '<div class="metric"><div class="label">Pendientes de pago</div><div class="value">'+pending+'</div><div class="sub">A cobrar por Administración</div></div>'+
-        '<div class="metric red"><div class="label">Pagos a revisar</div><div class="value">'+review+'</div><div class="sub">Preinscripciones con comprobante</div></div>'+
-        '<div class="metric green"><div class="label">Pagados</div><div class="value">'+paid+'</div><div class="sub">Pago confirmado</div></div>'+
-      '</div>'+
       '';
 
+    $('#registrationExcelButton').onclick=()=>downloadExcel(all);
     $('#registrationSettingsButton').onclick=()=>settingsModal(settings,search,statusFilter);
 
     let timer;
