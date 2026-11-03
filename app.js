@@ -25,6 +25,8 @@ let profile = null;
 let catalogs = { teams: [], leagues: [], coaches: [] };
 let playerFilters = { team:'all', status:'all', injury:'all', debt:'all' };
 let playerAdminCache = null;
+let adminSyncChannel = null;
+let adminSyncTimer = null;
 
 const sectionTitles = {
   dashboard:'Dashboard', players:'Jugadores', teams:'Equipos', matches:'Partidos',
@@ -166,12 +168,56 @@ async function verifyAdmin(){
   return true;
 }
 
+
+function scheduleAdminSyncRefresh(){
+  playerAdminCache=null;
+  clearTimeout(adminSyncTimer);
+  adminSyncTimer=setTimeout(async()=>{
+    if(document.hidden) return;
+    if(appView.classList.contains('hidden')) return;
+    if(!$('#modalBackdrop').classList.contains('hidden')) return;
+
+    try{
+      await loadCatalogs();
+      await navigate(activeSection,true);
+    }catch(ex){
+      console.warn('ADMIN SYNC REFRESH ERROR',ex);
+    }
+  },500);
+}
+
+function startAdminRealtimeSync(){
+  if(adminSyncChannel) return;
+
+  try{
+    adminSyncChannel=supabase
+      .channel('cataluna-admin-web-sync')
+      .on(
+        'postgres_changes',
+        {event:'*',schema:'public'},
+        ()=>scheduleAdminSyncRefresh()
+      )
+      .subscribe();
+  }catch(ex){
+    console.warn('REALTIME SYNC NOT AVAILABLE',ex);
+  }
+}
+
+window.addEventListener('focus',()=>{
+  if(!appView.classList.contains('hidden')) scheduleAdminSyncRefresh();
+});
+
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden && !appView.classList.contains('hidden')) scheduleAdminSyncRefresh();
+});
+
 async function showApp(){
   loginView.classList.add('hidden'); appView.classList.remove('hidden');
   const name=[profile?.first_name,profile?.last_name].filter(Boolean).join(' ')||'Administración';
   $('#sidebarUserName').textContent=name; $('#sidebarAvatar').textContent=(profile?.first_name?.[0]||'A').toUpperCase();
   await loadCatalogs();
-  navigate(activeSection);
+  startAdminRealtimeSync();
+  navigate(activeSection,true);
 }
 
 $('#loginForm').addEventListener('submit',async e=>{
@@ -211,13 +257,40 @@ async function loadCatalogs(){
 
 $('#mainNav').addEventListener('click',e=>{ const b=e.target.closest('[data-section]'); if(b) navigate(b.dataset.section); });
 $('#refreshButton').onclick=()=>navigate(activeSection,true);
-async function navigate(section){
+async function navigate(section,force=false){
   activeSection=section; destroyCharts();
+  if(force) playerAdminCache=null;
   $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.section===section));
   titleEl.textContent=sectionTitles[section]||section; eyebrowEl.textContent='CATALUÑA · ADMIN WEB'; loading();
   try{
-    const fn={dashboard:renderDashboard,players:renderPlayers,teams:renderTeams,matches:renderMatches,attendance:renderAttendance,citations:renderCitations,commitment:renderCommitment,users:renderUsers,leagues:renderLeagues,news:renderNews,sponsors:renderSponsors,benefits:renderBenefits,controlPanel:()=>controlPanelModule.render(),registration2027:renderRegistration2027,payments:renderPayments,concepts:renderConcepts,expenses:renderExpenses,balances:renderBalances,files:renderFiles}[section];
-    await (fn||renderDashboard)(); setUpdated();
+    if(['players','teams','matches','attendance','citations','users','leagues'].includes(section)){
+      await loadCatalogs();
+    }
+
+    const fn={
+      dashboard:renderDashboard,
+      players:()=>renderPlayers('',force),
+      teams:renderTeams,
+      matches:renderMatches,
+      attendance:renderAttendance,
+      citations:renderCitations,
+      commitment:renderCommitment,
+      users:renderUsers,
+      leagues:renderLeagues,
+      news:renderNews,
+      sponsors:renderSponsors,
+      benefits:renderBenefits,
+      controlPanel:()=>controlPanelModule.render(),
+      registration2027:renderRegistration2027,
+      payments:renderPayments,
+      concepts:renderConcepts,
+      expenses:renderExpenses,
+      balances:renderBalances,
+      files:renderFiles
+    }[section];
+
+    await (fn||renderDashboard)();
+    setUpdated();
   }catch(ex){ console.error(ex); content.innerHTML=`<div class="card"><h3>No pudimos cargar esta sección</h3><p class="section-note">${esc(ex.message||ex)}</p></div>`; }
 }
 
