@@ -111,3 +111,13 @@ input[name="is_injured"]{accent-color:var(--red)}
 .debt-link.has-debt{color:var(--red)}
 .debt-link.no-debt{color:var(--green)}
 .debt-link:hover{opacity:.72}
+
+
+/* Pagos · próximos conceptos */
+.future-metric{background:#fff8d8;border-color:#f1d36a}
+.future-metric .value{color:#9a6b00}
+.future-concepts-card{margin-top:16px;padding:16px;border:1px solid #f1d36a;border-radius:16px;background:#fff8d8}
+.future-concepts-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.future-concepts-title{font-size:13px;font-weight:900;color:#9a6b00;letter-spacing:.04em}
+.future-concepts-sub{font-size:12px;color:#79611b;margin-top:3px}
+.future-concepts-card .table-wrap{background:#fff;border-radius:12px;overflow:auto}
