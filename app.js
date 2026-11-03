@@ -369,8 +369,12 @@ async function loadAllPlayers(){
   let offset=0;
   let items=[];
   let payload={};
+  let total=0;
+  let safety=0;
 
-  while(true){
+  while(safety<50){
+    safety+=1;
+
     const {data,error}=await supabase.rpc('admin_get_students_page',{
       p_search:'',
       p_filter:'all',
@@ -381,16 +385,26 @@ async function loadAllPlayers(){
 
     payload=data||payload||{};
     const page=Array.isArray(data?.items)?data.items:[];
-    items.push(...page);
 
-    const total=Number(data?.total_count||items.length);
+    if(page.length===0) break;
+
+    items.push(...page);
+    total=Number(data?.total_count||data?.filtered_count||total||items.length);
     offset+=page.length;
-    if(page.length===0 || page.length<pageSize || items.length>=total) break;
+
+    const uniqueCount=new Set(items.map(row=>String(row.id))).size;
+    if(total>0 && uniqueCount>=total) break;
   }
 
   const unique=new Map();
-  items.forEach(row=>unique.set(String(row.id),row));
-  return {items:[...unique.values()],payload};
+  items.forEach(row=>{
+    if(row?.id) unique.set(String(row.id),row);
+  });
+
+  return {
+    items:[...unique.values()],
+    payload:{...payload,total_count:Number(payload?.total_count||total||unique.size)}
+  };
 }
 
 async function loadPlayerTeamMap(players){
