@@ -1036,15 +1036,72 @@ async function editTeam(row=null){
   let currentCoach='',currentLeague='';
 
   if(row){
-    const [c,l]=await Promise.all([
-      supabase.from('team_coaches').select('coach_id').eq('team_id',row.id).maybeSingle(),
-      supabase.from('team_leagues').select('league_id').eq('team_id',row.id).maybeSingle()
+    const [coachRows,leagueRows]=await Promise.all([
+      supabase
+        .from('team_coaches')
+        .select('coach_id,is_main_coach,created_at')
+        .eq('team_id',row.id)
+        .order('is_main_coach',{ascending:false})
+        .order('created_at',{ascending:true})
+        .limit(10),
+      supabase
+        .from('team_leagues')
+        .select('league_id,created_at')
+        .eq('team_id',row.id)
+        .order('created_at',{ascending:true})
+        .limit(1)
     ]);
-    currentCoach=c.data?.coach_id||'';
-    currentLeague=l.data?.league_id||'';
+
+    currentCoach=Array.isArray(coachRows.data)&&coachRows.data.length
+      ? String(coachRows.data[0].coach_id||'')
+      : '';
+    currentLeague=Array.isArray(leagueRows.data)&&leagueRows.data.length
+      ? String(leagueRows.data[0].league_id||'')
+      : '';
   }
 
   let coachOptions=[...(catalogs.coaches||[])];
+
+  // Mismo criterio de respaldo que la app: el RPC de staff también informa
+  // los equipos asociados al entrenador en team_names.
+  if(row && !currentCoach){
+    const normalize=value=>String(value||'')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .trim()
+      .toLowerCase();
+
+    const teamName=normalize(row.name);
+    const assignedByTeamName=coachOptions.find(coach=>
+      String(coach.team_names||'')
+        .split(',')
+        .map(name=>normalize(name))
+        .filter(Boolean)
+        .includes(teamName)
+    );
+
+    if(assignedByTeamName) currentCoach=String(assignedByTeamName.id);
+  }
+
+  // Último respaldo para instalaciones antiguas que guardaban coach_name en teams.
+  if(row && !currentCoach && row.coach_name){
+    const normalize=value=>String(value||'')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .replace(/\s+/g,' ')
+      .trim()
+      .toLowerCase();
+
+    const expected=normalize(row.coach_name);
+    const assignedByName=coachOptions.find(coach=>{
+      const firstLast=normalize([coach.first_name,coach.last_name].filter(Boolean).join(' '));
+      const lastFirst=normalize([coach.last_name,coach.first_name].filter(Boolean).join(' '));
+      return expected===firstLast || expected===lastFirst;
+    });
+
+    if(assignedByName) currentCoach=String(assignedByName.id);
+  }
+
   if(currentCoach && !coachOptions.some(coach=>String(coach.id)===String(currentCoach))){
     const {data:assignedCoach}=await supabase
       .from('profiles')
