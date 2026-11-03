@@ -25,8 +25,7 @@ let profile = null;
 let catalogs = { teams: [], leagues: [], coaches: [] };
 let playerFilters = { team:'all', status:'all', injury:'all', debt:'all' };
 let playerAdminCache = null;
-let adminSyncChannel = null;
-let adminSyncTimer = null;
+let adminHourlyInterval = null;
 let paymentAdminCache = null;
 let paymentFilters = { team:'all', activity:'all', discount:'all', debt:'all' };
 
@@ -171,55 +170,32 @@ async function verifyAdmin(){
 }
 
 
-function scheduleAdminSyncRefresh(){
-  playerAdminCache=null;
-  paymentAdminCache=null;
-  clearTimeout(adminSyncTimer);
-  adminSyncTimer=setTimeout(async()=>{
+function startHourlyAdminRefresh(){
+  if(adminHourlyInterval) return;
+
+  adminHourlyInterval=setInterval(async()=>{
     if(document.hidden) return;
     if(appView.classList.contains('hidden')) return;
     if(!$('#modalBackdrop').classList.contains('hidden')) return;
 
     try{
+      playerAdminCache=null;
+      paymentAdminCache=null;
       await loadCatalogs();
       await navigate(activeSection,true);
     }catch(ex){
-      console.warn('ADMIN SYNC REFRESH ERROR',ex);
+      console.warn('HOURLY ADMIN REFRESH ERROR',ex);
     }
-  },500);
+  },60*60*1000);
 }
 
-function startAdminRealtimeSync(){
-  if(adminSyncChannel) return;
-
-  try{
-    adminSyncChannel=supabase
-      .channel('cataluna-admin-web-sync')
-      .on(
-        'postgres_changes',
-        {event:'*',schema:'public'},
-        ()=>scheduleAdminSyncRefresh()
-      )
-      .subscribe();
-  }catch(ex){
-    console.warn('REALTIME SYNC NOT AVAILABLE',ex);
-  }
-}
-
-window.addEventListener('focus',()=>{
-  if(!appView.classList.contains('hidden')) scheduleAdminSyncRefresh();
-});
-
-document.addEventListener('visibilitychange',()=>{
-  if(!document.hidden && !appView.classList.contains('hidden')) scheduleAdminSyncRefresh();
-});
 
 async function showApp(){
   loginView.classList.add('hidden'); appView.classList.remove('hidden');
   const name=[profile?.first_name,profile?.last_name].filter(Boolean).join(' ')||'Administración';
   $('#sidebarUserName').textContent=name; $('#sidebarAvatar').textContent=(profile?.first_name?.[0]||'A').toUpperCase();
   await loadCatalogs();
-  startAdminRealtimeSync();
+  startHourlyAdminRefresh();
   navigate(activeSection,true);
 }
 
