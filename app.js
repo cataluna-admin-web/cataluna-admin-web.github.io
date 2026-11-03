@@ -1628,6 +1628,142 @@ function openPaymentFilters(search){
   };
 }
 
+
+async function openPaymentNotification(row){
+  try{
+    const guardiansRes=await supabase.rpc('admin_get_student_guardians',{p_student_id:row.id});
+    if(guardiansRes.error) throw guardiansRes.error;
+
+    const guardians=Array.isArray(guardiansRes.data)?guardiansRes.data:[];
+    const guardianIds=guardians.map(g=>g.id).filter(Boolean);
+
+    let profilesById=new Map();
+    if(guardianIds.length){
+      const {data:guardianProfiles,error:profilesError}=await supabase
+        .from('profiles')
+        .select('id,first_name,last_name,email')
+        .in('id',guardianIds);
+
+      if(!profilesError){
+        profilesById=new Map((guardianProfiles||[]).map(p=>[String(p.id),p]));
+      }
+    }
+
+    const extraRes=await supabase
+      .from('student_notification_contacts')
+      .select('id,contact_name,email,created_at')
+      .eq('student_id',row.id)
+      .order('created_at',{ascending:true});
+
+    const extraContacts=extraRes.error?[]:(extraRes.data||[]);
+    const extraTableMissing=extraRes.error && String(extraRes.error.code||'')==='42P01';
+
+    const registeredRows=guardians.map(g=>{
+      const profileRow=profilesById.get(String(g.id))||{};
+      return {
+        first_name:profileRow.first_name||g.first_name||'',
+        last_name:profileRow.last_name||g.last_name||'',
+        email:profileRow.email||'',
+        relationship:g.relationship||''
+      };
+    });
+
+    openModal(`Notificación · ${row.last_name||''} ${row.first_name||''}`,`
+      <div class="notification-contact-section">
+        <div class="section-title">ADULTOS RESPONSABLES REGISTRADOS</div>
+        <div class="section-note" style="margin-bottom:10px">Datos asociados al jugador desde la app.</div>
+
+        <div class="notification-contact-list">
+          ${registeredRows.length?registeredRows.map(item=>`
+            <div class="notification-contact-card">
+              <div>
+                <strong>${esc([item.last_name,item.first_name].filter(Boolean).join(' ')||'Adulto responsable')}</strong>
+                ${item.relationship?`<div class="card-sub">${esc(item.relationship)}</div>`:''}
+              </div>
+              <div class="notification-contact-email">
+                ${item.email?`<a href="mailto:${esc(item.email)}">${esc(item.email)}</a>`:'<span class="section-note">Sin email cargado</span>'}
+              </div>
+            </div>
+          `).join(''):'<div class="empty">Este jugador no tiene adultos responsables asociados.</div>'}
+        </div>
+      </div>
+
+      <div class="notification-contact-section" style="margin-top:18px">
+        <div class="section-title">EMAILS ADICIONALES DE CONTACTO</div>
+        <div class="section-note" style="margin-bottom:10px">Estos contactos son solo para notificaciones administrativas y no crean una cuenta en la app.</div>
+
+        ${extraTableMissing?'<div class="empty">Falta activar la tabla de contactos adicionales en Supabase.</div>':`
+          <div class="notification-contact-list">
+            ${extraContacts.length?extraContacts.map(item=>`
+              <div class="notification-contact-card">
+                <div><strong>${esc(item.contact_name||'Contacto adicional')}</strong></div>
+                <div class="notification-contact-email"><a href="mailto:${esc(item.email)}">${esc(item.email)}</a></div>
+              </div>
+            `).join(''):'<div class="empty">No hay emails adicionales cargados.</div>'}
+          </div>
+
+          <form id="notificationContactForm" class="form-grid" style="margin-top:14px">
+            <label>Nombre / referencia
+              <input name="contact_name" placeholder="Ej. Mamá, Papá, Secretaría">
+            </label>
+            <label>Email
+              <input name="email" type="email" required placeholder="nombre@correo.com">
+            </label>
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">Agregar email</button>
+            </div>
+          </form>
+        `}
+      </div>
+    `);
+
+    if(!extraTableMissing){
+      $('#notificationContactForm').onsubmit=async e=>{
+        e.preventDefault();
+        const form=e.currentTarget;
+        const fd=new FormData(form);
+        const email=String(fd.get('email')||'').trim().toLowerCase();
+        const contactName=String(fd.get('contact_name')||'').trim();
+
+        if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+          toast('Ingresá un email válido.','error');
+          return;
+        }
+
+        const btn=form.querySelector('button[type="submit"]');
+        btn.disabled=true;
+        const old=btn.textContent;
+        btn.textContent='Guardando...';
+
+        const {error}=await supabase
+          .from('student_notification_contacts')
+          .insert({
+            student_id:row.id,
+            contact_name:contactName||null,
+            email
+          });
+
+        if(error){
+          btn.disabled=false;
+          btn.textContent=old;
+          if(String(error.code||'')==='23505'){
+            toast('Ese email ya está agregado para este jugador.','error');
+          }else{
+            toast(error.message||'No pudimos agregar el email.','error');
+          }
+          return;
+        }
+
+        toast('Email de contacto agregado.');
+        await openPaymentNotification(row);
+      };
+    }
+  }catch(ex){
+    console.error('PAYMENT NOTIFICATION CONTACTS ERROR',ex);
+    toast(ex?.message||'No pudimos cargar los contactos de notificación.','error');
+  }
+}
+
 async function openDebtDetail(row){
   try{
     const [accountRes,optionsRes]=await Promise.all([
@@ -1792,6 +1928,7 @@ async function renderPayments(search='',force=false){
           <tr>
             <th>Jugador</th>
             <th>Equipo/s</th>
+            <th>Notificación</th>
             <th>Actividad</th>
             <th>Descuento</th>
             <th>Deuda</th>
@@ -1810,6 +1947,7 @@ async function renderPayments(search='',force=false){
               <tr>
                 <td class="name-cell">${esc(row.last_name)} ${esc(row.first_name)}</td>
                 <td>${esc(teams.map(t=>t.name).join(', ')||'Sin equipo')}</td>
+                <td><button class="btn light small pay-notification" data-id="${row.id}">NOTIFICACIÓN</button></td>
                 <td>${esc(activity)}</td>
                 <td>${esc(discount)}${discountPct>0?` · ${discountPct}%`:''}</td>
                 <td>
@@ -1826,7 +1964,7 @@ async function renderPayments(search='',force=false){
                 </td>
               </tr>
             `;
-          }).join(''):'<tr><td colspan="6"><div class="empty">No hay jugadores que coincidan con los filtros.</div></td></tr>'}
+          }).join(''):'<tr><td colspan="7"><div class="empty">No hay jugadores que coincidan con los filtros.</div></td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1840,8 +1978,9 @@ async function renderPayments(search='',force=false){
   $('#payFilterBtn').onclick=()=>openPaymentFilters($('#paySearch').value.trim());
 
   const findRow=id=>rows.find(r=>String(r.id)===String(id));
-  $$('.debt-link').forEach(b=>b.onclick=()=>openDebtDetail(findRow(b.dataset.id)));
-  $$('.pay-account').forEach(b=>b.onclick=()=>openPlayerAccount(findRow(b.dataset.id)));
+  $('.debt-link').forEach(b=>b.onclick=()=>openDebtDetail(findRow(b.dataset.id)));
+  $('.pay-notification').forEach(b=>b.onclick=()=>openPaymentNotification(findRow(b.dataset.id)));
+  $('.pay-account').forEach(b=>b.onclick=()=>openPlayerAccount(findRow(b.dataset.id)));
   $$('.pay-new').forEach(b=>b.onclick=()=>openPaymentEntry(findRow(b.dataset.id)));
   $$('.pay-review').forEach(b=>b.onclick=()=>openPaymentReview(findRow(b.dataset.id)));
 }
