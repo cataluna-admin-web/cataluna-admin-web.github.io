@@ -104,3 +104,10 @@ input[name="is_injured"]{accent-color:var(--red)}
 .player-compact-table th{padding:9px 13px}
 .player-compact-table .btn.small{padding:6px 9px;font-size:11px}
 .player-compact-table .badge{padding:4px 7px}
+
+
+/* Pagos · deuda clickeable */
+.debt-link{border:0;background:transparent;padding:5px 0;font:inherit;font-weight:900;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.debt-link.has-debt{color:var(--red)}
+.debt-link.no-debt{color:var(--green)}
+.debt-link:hover{opacity:.72}
