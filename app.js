@@ -1,5 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import Chart from 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm';
+import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm';
 import { createRegistration2027Module } from './registration-2027.js?v=20261022-excel-metrics';
 import { createControlPanelModule } from './control-panel.js?v=20261015-1';
 
@@ -242,16 +243,242 @@ async function renderDashboard(){
   charts.push(new Chart($('#expenseChart'),{type:'doughnut',data:{labels:cats.map(x=>x.category),datasets:[{data:cats.map(x=>x.amount),backgroundColor:['#5A3686','#8a6aaa','#b497cc','#E1CADB','#302436','#9b6b83','#c6a7b9']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}}));
 }
 
-async function renderPlayers(search=''){
-  const {data,error}=await supabase.rpc('admin_get_students_page',{p_search:search,p_filter:'all',p_limit:100,p_offset:0});
-  if(error) throw error; const rows=data?.items||[];
-  content.innerHTML=`<div class="toolbar"><input id="playerSearch" class="grow" placeholder="Buscar por DNI, nombre o apellido" value="${esc(search)}"><button class="btn primary" id="newPlayer">+ Nuevo jugador</button></div>
-    <div class="metrics"><div class="metric"><div class="label">Total</div><div class="value">${data?.total_count||0}</div></div><div class="metric"><div class="label">Sin equipo</div><div class="value">${data?.sin_equipo_count||0}</div></div></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>Jugador</th><th>DNI</th><th>Nacimiento</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="name-cell">${esc(r.first_name)} ${esc(r.last_name)}</td><td>${esc(r.dni)}</td><td>${dateLabel(r.birth_date)}</td><td>${activeStatus(r)}</td><td><div class="actions"><button class="btn light small edit-player" data-id="${r.id}">Editar</button><button class="btn light small account-player" data-id="${r.id}">Cuenta</button></div></td></tr>`).join('')}</tbody></table></div>`;
-  let timer; $('#playerSearch').oninput=e=>{clearTimeout(timer);timer=setTimeout(()=>renderPlayers(e.target.value.trim()),300)};
+
+async function loadAllPlayers(){
+  const pageSize=100;
+  let offset=0;
+  let items=[];
+  let payload={};
+
+  while(true){
+    const {data,error}=await supabase.rpc('admin_get_students_page',{
+      p_search:'',
+      p_filter:'all',
+      p_limit:pageSize,
+      p_offset:offset
+    });
+    if(error) throw error;
+
+    payload=data||payload||{};
+    const page=Array.isArray(data?.items)?data.items:[];
+    items.push(...page);
+
+    const total=Number(data?.total_count||items.length);
+    offset+=page.length;
+    if(page.length===0 || page.length<pageSize || items.length>=total) break;
+  }
+
+  const unique=new Map();
+  items.forEach(row=>unique.set(String(row.id),row));
+  return {items:[...unique.values()],payload};
+}
+
+async function loadPlayerTeamMap(players){
+  const ids=(players||[]).map(r=>r.id).filter(Boolean);
+  const map=new Map();
+  if(!ids.length) return map;
+
+  const {data,error}=await supabase
+    .from('team_students')
+    .select('student_id,team_id,status')
+    .in('student_id',ids)
+    .eq('status','activo');
+
+  if(error){
+    console.warn('PLAYER TEAM MAP ERROR',error);
+    return map;
+  }
+
+  const teamById=new Map((catalogs.teams||[]).map(team=>[String(team.id),team]));
+  (data||[]).forEach(link=>{
+    const studentId=String(link.student_id||'');
+    if(!studentId) return;
+    if(!map.has(studentId)) map.set(studentId,[]);
+    const team=teamById.get(String(link.team_id||''));
+    map.get(studentId).push(team?.name||String(link.team_id||''));
+  });
+  return map;
+}
+
+function playerFilterLabel(filter){
+  if(filter==='enabled') return 'Habilitados';
+  if(filter==='disabled') return 'No habilitados';
+  if(filter==='sin_equipo') return 'Sin equipo';
+  if(filter==='injured') return 'Lesionados';
+  return 'Todos';
+}
+
+function exportPlayersExcel(players,teamMap){
+  const rows=(players||[]).map(row=>({
+    'Apellido':row.last_name||'',
+    'Nombre':row.first_name||'',
+    'DNI':row.dni||'',
+    'Fecha de nacimiento':dateLabel(row.birth_date),
+    'Género':row.gender||'',
+    'Equipo/s':(teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo',
+    'Habilitación':row.is_enabled===false?'NO HABILITADO':'HABILITADO',
+    'Lesionado':row.is_injured?'SÍ':'NO'
+  }));
+
+  const sheet=XLSX.utils.json_to_sheet(rows);
+  sheet['!cols']=[
+    {wch:22},{wch:22},{wch:14},{wch:20},{wch:14},{wch:38},{wch:18},{wch:12}
+  ];
+  const book=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book,sheet,'Jugadores');
+  const stamp=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(book,'Jugadores_Cataluna_'+stamp+'.xlsx');
+}
+
+async function openPlayerGuardians(row,teamMap){
+  const playerName=[row.last_name,row.first_name].filter(Boolean).join(' ');
+  openModal('Adultos responsables',`
+    <div class="card" style="box-shadow:none;margin-bottom:14px">
+      <strong>${esc(playerName)}</strong>
+      <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc((teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo')}</div>
+    </div>
+    <div class="loading"><div><div class="spinner"></div>Cargando adultos responsables...</div></div>
+  `);
+
+  let result=await supabase.rpc('admin_get_student_guardians',{p_student_id:row.id});
+  if(result.error){
+    result=await supabase.rpc('coach_get_student_guardians',{p_student_id:row.id});
+  }
+
+  const body=$('#modalBody');
+  if(!body) return;
+
+  if(result.error){
+    body.innerHTML='<div class="empty">No pudimos cargar los adultos responsables asociados.</div>';
+    return;
+  }
+
+  const guardians=Array.isArray(result.data)?result.data:[];
+  if(!guardians.length){
+    body.innerHTML=`
+      <div class="card" style="box-shadow:none;margin-bottom:14px">
+        <strong>${esc(playerName)}</strong>
+        <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc((teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo')}</div>
+      </div>
+      <div class="empty">Este jugador todavía no tiene adultos responsables vinculados.</div>
+    `;
+    return;
+  }
+
+  body.innerHTML=`
+    <div class="card" style="box-shadow:none;margin-bottom:14px">
+      <strong>${esc(playerName)}</strong>
+      <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc((teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo')}</div>
+    </div>
+    <div style="display:grid;gap:12px">
+      ${guardians.map(g=>`
+        <div class="card" style="box-shadow:none">
+          <strong>${esc([g.last_name,g.first_name].filter(Boolean).join(' ')||'Adulto responsable')}</strong>
+          <div class="card-sub" style="margin-top:5px">${esc(g.relationship||'Vínculo sin cargar')}</div>
+          ${g.dni?`<div style="margin-top:10px"><strong>DNI:</strong> ${esc(g.dni)}</div>`:''}
+          ${g.phone?`<div style="margin-top:6px"><strong>Teléfono:</strong> <a href="tel:${esc(String(g.phone).replace(/[^0-9+]/g,''))}">${esc(g.phone)}</a></div>`:'<div style="margin-top:6px"><strong>Teléfono:</strong> Sin teléfono</div>'}
+          ${g.email?`<div style="margin-top:6px"><strong>Email:</strong> <a href="mailto:${esc(g.email)}">${esc(g.email)}</a></div>`:''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function renderPlayers(search='',filter='all'){
+  const [{items:allRows,payload},teamMap]=await Promise.all([
+    loadAllPlayers(),
+    (async()=>new Map())()
+  ]);
+
+  const resolvedTeamMap=await loadPlayerTeamMap(allRows);
+
+  const sorted=[...allRows].sort((a,b)=>{
+    const last=String(a.last_name||'').localeCompare(String(b.last_name||''),'es',{sensitivity:'base'});
+    if(last!==0) return last;
+    return String(a.first_name||'').localeCompare(String(b.first_name||''),'es',{sensitivity:'base'});
+  });
+
+  const q=String(search||'').trim().toLowerCase();
+  const disabledCount=sorted.filter(r=>r.is_enabled===false).length;
+  const noTeamCount=sorted.filter(r=>(resolvedTeamMap.get(String(r.id))||[]).length===0).length;
+
+  const rows=sorted.filter(r=>{
+    const teams=resolvedTeamMap.get(String(r.id))||[];
+    if(filter==='enabled' && r.is_enabled===false) return false;
+    if(filter==='disabled' && r.is_enabled!==false) return false;
+    if(filter==='sin_equipo' && teams.length>0) return false;
+    if(filter==='injured' && !r.is_injured) return false;
+
+    if(!q) return true;
+    const haystack=[
+      r.last_name,r.first_name,r.dni,r.gender,dateLabel(r.birth_date),...teams
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+
+  content.innerHTML=`
+    <div class="toolbar">
+      <input id="playerSearch" class="grow" placeholder="Buscar por DNI, apellido, nombre o equipo" value="${esc(search)}">
+      <select id="playerFilter" style="max-width:220px">
+        <option value="all" ${filter==='all'?'selected':''}>Todos</option>
+        <option value="enabled" ${filter==='enabled'?'selected':''}>Habilitados</option>
+        <option value="disabled" ${filter==='disabled'?'selected':''}>No habilitados</option>
+        <option value="sin_equipo" ${filter==='sin_equipo'?'selected':''}>Sin equipo</option>
+        <option value="injured" ${filter==='injured'?'selected':''}>Lesionados</option>
+      </select>
+      <button class="btn light" id="exportPlayers">📊 EXPORTAR EXCEL</button>
+      <button class="btn primary" id="newPlayer">+ Nuevo jugador</button>
+    </div>
+
+    <div class="metrics">
+      <div class="metric player-metric" data-filter="all" style="cursor:pointer"><div class="label">Total</div><div class="value">${Number(payload?.total_count||sorted.length)}</div><div class="sub">Todos los jugadores</div></div>
+      <div class="metric player-metric" data-filter="sin_equipo" style="cursor:pointer"><div class="label">Sin equipo</div><div class="value">${noTeamCount}</div><div class="sub">Sin equipo asignado</div></div>
+      <div class="metric red player-metric" data-filter="disabled" style="cursor:pointer"><div class="label">No habilitados</div><div class="value">${disabledCount}</div><div class="sub">No habilitados para jugar</div></div>
+    </div>
+
+    <div style="margin:0 0 12px;color:#666;font-weight:700">Mostrando ${rows.length} · Filtro: ${esc(playerFilterLabel(filter))}</div>
+
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Jugador</th><th>DNI</th><th>Equipo/s</th><th>Nacimiento</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>
+        ${rows.length?rows.map(r=>{
+          const teams=resolvedTeamMap.get(String(r.id))||[];
+          return `<tr class="player-row" data-id="${r.id}" style="cursor:pointer">
+            <td class="name-cell"><span style="text-decoration:underline;text-decoration-color:#ddd;text-underline-offset:3px">${esc(r.last_name)} ${esc(r.first_name)}</span></td>
+            <td>${esc(r.dni)}</td>
+            <td>${esc(teams.join(', ')||'Sin equipo')}</td>
+            <td>${dateLabel(r.birth_date)}</td>
+            <td>${activeStatus(r)}</td>
+            <td><div class="actions">
+              <button class="btn light small edit-player" data-id="${r.id}">Editar</button>
+              <button class="btn light small account-player" data-id="${r.id}">Cuenta</button>
+            </div></td>
+          </tr>`;
+        }).join(''):'<tr><td colspan="6"><div class="empty">No hay jugadores que coincidan con los filtros.</div></td></tr>'}
+      </tbody>
+    </table></div>
+  `;
+
+  let timer;
+  $('#playerSearch').oninput=e=>{
+    clearTimeout(timer);
+    timer=setTimeout(()=>renderPlayers(e.target.value.trim(),$('#playerFilter').value),300);
+  };
+  $('#playerFilter').onchange=e=>renderPlayers($('#playerSearch').value.trim(),e.target.value);
+  $('#exportPlayers').onclick=()=>exportPlayersExcel(sorted,resolvedTeamMap);
   $('#newPlayer').onclick=()=>editPlayer();
-  $$('.edit-player').forEach(b=>b.onclick=()=>editPlayer(rows.find(r=>r.id===b.dataset.id)));
-  $$('.account-player').forEach(b=>b.onclick=()=>openPlayerAccount(rows.find(r=>r.id===b.dataset.id)));
+
+  $$('.player-metric').forEach(card=>card.onclick=()=>renderPlayers($('#playerSearch').value.trim(),card.dataset.filter||'all'));
+
+  $$('.player-row').forEach(tr=>tr.onclick=()=>openPlayerGuardians(rows.find(r=>String(r.id)===String(tr.dataset.id)),resolvedTeamMap));
+  $$('.edit-player').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    editPlayer(rows.find(r=>String(r.id)===String(b.dataset.id)));
+  });
+  $$('.account-player').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    openPlayerAccount(rows.find(r=>String(r.id)===String(b.dataset.id)));
+  });
 }
 
 async function editPlayer(row=null){
