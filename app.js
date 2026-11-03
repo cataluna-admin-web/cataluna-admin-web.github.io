@@ -23,6 +23,8 @@ let activeSection = 'dashboard';
 let charts = [];
 let profile = null;
 let catalogs = { teams: [], leagues: [], coaches: [] };
+let playerFilters = { team:'all', status:'all', injury:'all', debt:'all' };
+let playerAdminCache = null;
 
 const sectionTitles = {
   dashboard:'Dashboard', players:'Jugadores', teams:'Equipos', matches:'Partidos',
@@ -182,13 +184,29 @@ $('#loginForm').addEventListener('submit',async e=>{
 $('#logoutButton').onclick=async()=>{await supabase.auth.signOut(); location.reload();};
 
 async function loadCatalogs(){
-  const [teams,leagues,profiles] = await Promise.all([
+  const [teams,leagues,profiles,extraRoles] = await Promise.all([
     supabase.from('teams').select('*').eq('is_enabled',true).order('name'),
     supabase.from('leagues').select('*').eq('is_enabled',true).order('name'),
-    supabase.from('profiles').select('id,first_name,last_name,role,is_enabled,is_active').eq('is_enabled',true).eq('is_active',true).order('last_name')
+    supabase.from('profiles').select('id,first_name,last_name,role,is_enabled,is_active').eq('is_enabled',true).eq('is_active',true).order('last_name'),
+    supabase.from('profile_roles').select('profile_id,role,is_enabled').eq('role','entrenador').eq('is_enabled',true)
   ]);
-  catalogs.teams=teams.data||[]; catalogs.leagues=leagues.data||[];
-  catalogs.coaches=(profiles.data||[]).filter(p=>p.role==='entrenador'||p.role==='administrativo');
+
+  catalogs.teams=teams.data||[];
+  catalogs.leagues=leagues.data||[];
+
+  const coachIds=new Set(
+    (extraRoles.data||[])
+      .map(r=>String(r.profile_id||''))
+      .filter(Boolean)
+  );
+
+  catalogs.coaches=(profiles.data||[])
+    .filter(p=>p.role==='entrenador'||coachIds.has(String(p.id)))
+    .sort((a,b)=>{
+      const last=String(a.last_name||'').localeCompare(String(b.last_name||''),'es',{sensitivity:'base'});
+      if(last!==0) return last;
+      return String(a.first_name||'').localeCompare(String(b.first_name||''),'es',{sensitivity:'base'});
+    });
 }
 
 $('#mainNav').addEventListener('click',e=>{ const b=e.target.closest('[data-section]'); if(b) navigate(b.dataset.section); });
@@ -242,6 +260,7 @@ async function renderDashboard(){
   const cats=d.expense_categories||[];
   charts.push(new Chart($('#expenseChart'),{type:'doughnut',data:{labels:cats.map(x=>x.category),datasets:[{data:cats.map(x=>x.amount),backgroundColor:['#5A3686','#8a6aaa','#b497cc','#E1CADB','#302436','#9b6b83','#c6a7b9']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}}));
 }
+
 
 
 async function loadAllPlayers(){
@@ -298,36 +317,80 @@ async function loadPlayerTeamMap(players){
       if(!studentId) return;
       if(!map.has(studentId)) map.set(studentId,[]);
       const team=teamById.get(String(link.team_id||''));
-      map.get(studentId).push(team?.name||String(link.team_id||''));
+      map.get(studentId).push({
+        id:String(link.team_id||''),
+        name:team?.name||String(link.team_id||'')
+      });
     });
   }
 
   return map;
 }
 
-function playerFilterLabel(filter){
-  if(filter==='enabled') return 'Habilitados';
-  if(filter==='disabled') return 'No habilitados';
-  if(filter==='sin_equipo') return 'Sin equipo';
-  if(filter==='injured') return 'Lesionados';
-  return 'Todos';
+async function loadPlayerDebtMap(players){
+  const map=new Map();
+  const rows=Array.isArray(players)?players:[];
+
+  for(let i=0;i<rows.length;i+=15){
+    const batch=rows.slice(i,i+15);
+    const results=await Promise.all(batch.map(async row=>{
+      const {data,error}=await supabase.rpc('admin_finance_get_account',{p_student_id:row.id});
+      return {id:String(row.id),debt:error?null:Number(data?.debt||0)};
+    }));
+    results.forEach(item=>map.set(item.id,item.debt));
+  }
+
+  return map;
 }
 
-function exportPlayersExcel(players,teamMap){
+async function getPlayerAdminData(force=false){
+  if(playerAdminCache && !force) return playerAdminCache;
+
+  const {items,payload}=await loadAllPlayers();
+  const [teamMap,debtMap]=await Promise.all([
+    loadPlayerTeamMap(items),
+    loadPlayerDebtMap(items)
+  ]);
+
+  playerAdminCache={items,payload,teamMap,debtMap};
+  return playerAdminCache;
+}
+
+function playerFiltersActiveCount(){
+  return Object.values(playerFilters).filter(v=>v!=='all').length;
+}
+
+function playerFilterSummary(){
+  const parts=[];
+  if(playerFilters.team!=='all'){
+    if(playerFilters.team==='none') parts.push('Sin equipo');
+    else parts.push((catalogs.teams||[]).find(t=>String(t.id)===String(playerFilters.team))?.name||'Equipo');
+  }
+  if(playerFilters.status==='enabled') parts.push('Habilitados');
+  if(playerFilters.status==='disabled') parts.push('No habilitados');
+  if(playerFilters.injury==='injured') parts.push('Lesionados');
+  if(playerFilters.injury==='healthy') parts.push('Sin lesión');
+  if(playerFilters.debt==='with_debt') parts.push('Con deuda');
+  if(playerFilters.debt==='no_debt') parts.push('Sin deuda');
+  return parts.length?parts.join(' · '):'Todos';
+}
+
+function exportPlayersExcel(players,teamMap,debtMap){
   const rows=(players||[]).map(row=>({
     'Apellido':row.last_name||'',
     'Nombre':row.first_name||'',
     'DNI':row.dni||'',
     'Fecha de nacimiento':dateLabel(row.birth_date),
     'Género':row.gender||'',
-    'Equipo/s':(teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo',
+    'Equipo/s':(teamMap.get(String(row.id))||[]).map(t=>t.name).join(', ')||'Sin equipo',
     'Habilitación':row.is_enabled===false?'NO HABILITADO':'HABILITADO',
-    'Lesionado':row.is_injured?'SÍ':'NO'
+    'Lesionado':row.is_injured?'SÍ':'NO',
+    'Deuda':debtMap.get(String(row.id))==null?'':Number(debtMap.get(String(row.id))||0)
   }));
 
   const sheet=XLSX.utils.json_to_sheet(rows);
   sheet['!cols']=[
-    {wch:22},{wch:22},{wch:14},{wch:20},{wch:14},{wch:38},{wch:18},{wch:12}
+    {wch:22},{wch:22},{wch:14},{wch:20},{wch:14},{wch:38},{wch:18},{wch:12},{wch:16}
   ];
   const book=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book,sheet,'Jugadores');
@@ -335,12 +398,80 @@ function exportPlayersExcel(players,teamMap){
   XLSX.writeFile(book,'Jugadores_Cataluna_'+stamp+'.xlsx');
 }
 
+function openPlayerFilters(search){
+  const teams=(catalogs.teams||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'es',{sensitivity:'base'}));
+
+  openModal('Filtrar jugadores',`
+    <form id="playerFiltersForm" class="form-grid">
+      <label class="span-2">Equipo
+        <select name="team">
+          <option value="all" ${playerFilters.team==='all'?'selected':''}>Todos los equipos</option>
+          <option value="none" ${playerFilters.team==='none'?'selected':''}>Sin equipo</option>
+          ${teams.map(t=>`<option value="${t.id}" ${String(playerFilters.team)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label>Estado
+        <select name="status">
+          <option value="all" ${playerFilters.status==='all'?'selected':''}>Todos</option>
+          <option value="enabled" ${playerFilters.status==='enabled'?'selected':''}>Habilitados</option>
+          <option value="disabled" ${playerFilters.status==='disabled'?'selected':''}>No habilitados</option>
+        </select>
+      </label>
+
+      <label>Lesión
+        <select name="injury">
+          <option value="all" ${playerFilters.injury==='all'?'selected':''}>Todos</option>
+          <option value="injured" ${playerFilters.injury==='injured'?'selected':''}>Lesionados</option>
+          <option value="healthy" ${playerFilters.injury==='healthy'?'selected':''}>Sin lesión</option>
+        </select>
+      </label>
+
+      <label class="span-2">Deuda
+        <select name="debt">
+          <option value="all" ${playerFilters.debt==='all'?'selected':''}>Todos</option>
+          <option value="with_debt" ${playerFilters.debt==='with_debt'?'selected':''}>Con deuda</option>
+          <option value="no_debt" ${playerFilters.debt==='no_debt'?'selected':''}>Sin deuda</option>
+        </select>
+      </label>
+
+      <div class="form-actions span-2">
+        <button type="button" class="btn light" id="clearPlayerFilters">Limpiar filtros</button>
+        <button type="button" class="btn light" id="cancelPlayerFilters">Cancelar</button>
+        <button class="btn primary" type="submit">Aplicar filtros</button>
+      </div>
+    </form>
+  `);
+
+  $('#cancelPlayerFilters').onclick=closeModal;
+  $('#clearPlayerFilters').onclick=async()=>{
+    playerFilters={team:'all',status:'all',injury:'all',debt:'all'};
+    closeModal();
+    await renderPlayers(search);
+  };
+
+  $('#playerFiltersForm').onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.currentTarget);
+    playerFilters={
+      team:String(fd.get('team')||'all'),
+      status:String(fd.get('status')||'all'),
+      injury:String(fd.get('injury')||'all'),
+      debt:String(fd.get('debt')||'all')
+    };
+    closeModal();
+    await renderPlayers(search);
+  };
+}
+
 async function openPlayerGuardians(row,teamMap){
   const playerName=[row.last_name,row.first_name].filter(Boolean).join(' ');
+  const teams=(teamMap.get(String(row.id))||[]).map(t=>t.name);
+
   openModal('Adultos responsables',`
     <div class="card" style="box-shadow:none;margin-bottom:14px">
       <strong>${esc(playerName)}</strong>
-      <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc((teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo')}</div>
+      <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc(teams.join(', ')||'Sin equipo')}</div>
     </div>
     <div class="loading"><div><div class="spinner"></div>Cargando adultos responsables...</div></div>
   `);
@@ -363,7 +494,7 @@ async function openPlayerGuardians(row,teamMap){
     body.innerHTML=`
       <div class="card" style="box-shadow:none;margin-bottom:14px">
         <strong>${esc(playerName)}</strong>
-        <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc((teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo')}</div>
+        <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc(teams.join(', ')||'Sin equipo')}</div>
       </div>
       <div class="empty">Este jugador todavía no tiene adultos responsables vinculados.</div>
     `;
@@ -373,7 +504,7 @@ async function openPlayerGuardians(row,teamMap){
   body.innerHTML=`
     <div class="card" style="box-shadow:none;margin-bottom:14px">
       <strong>${esc(playerName)}</strong>
-      <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc((teamMap.get(String(row.id))||[]).join(', ')||'Sin equipo')}</div>
+      <div class="card-sub">DNI ${esc(row.dni||'-')} · ${esc(teams.join(', ')||'Sin equipo')}</div>
     </div>
     <div style="display:grid;gap:12px">
       ${guardians.map(g=>`
@@ -389,9 +520,8 @@ async function openPlayerGuardians(row,teamMap){
   `;
 }
 
-async function renderPlayers(search='',filter='all'){
-  const {items:allRows,payload}=await loadAllPlayers();
-  const resolvedTeamMap=await loadPlayerTeamMap(allRows);
+async function renderPlayers(search='',force=false){
+  const {items:allRows,payload,teamMap,debtMap}=await getPlayerAdminData(force);
 
   const sorted=[...allRows].sort((a,b)=>{
     const last=String(a.last_name||'').localeCompare(String(b.last_name||''),'es',{sensitivity:'base'});
@@ -401,32 +531,37 @@ async function renderPlayers(search='',filter='all'){
 
   const q=String(search||'').trim().toLowerCase();
   const disabledCount=sorted.filter(r=>r.is_enabled===false).length;
-  const noTeamCount=sorted.filter(r=>(resolvedTeamMap.get(String(r.id))||[]).length===0).length;
+  const noTeamCount=sorted.filter(r=>(teamMap.get(String(r.id))||[]).length===0).length;
 
   const rows=sorted.filter(r=>{
-    const teams=resolvedTeamMap.get(String(r.id))||[];
-    if(filter==='enabled' && r.is_enabled===false) return false;
-    if(filter==='disabled' && r.is_enabled!==false) return false;
-    if(filter==='sin_equipo' && teams.length>0) return false;
-    if(filter==='injured' && !r.is_injured) return false;
+    const teams=teamMap.get(String(r.id))||[];
+    const debt=debtMap.get(String(r.id));
+
+    if(playerFilters.team==='none' && teams.length>0) return false;
+    if(playerFilters.team!=='all' && playerFilters.team!=='none' && !teams.some(t=>String(t.id)===String(playerFilters.team))) return false;
+
+    if(playerFilters.status==='enabled' && r.is_enabled===false) return false;
+    if(playerFilters.status==='disabled' && r.is_enabled!==false) return false;
+
+    if(playerFilters.injury==='injured' && !r.is_injured) return false;
+    if(playerFilters.injury==='healthy' && r.is_injured) return false;
+
+    if(playerFilters.debt==='with_debt' && !(Number(debt||0)>0)) return false;
+    if(playerFilters.debt==='no_debt' && Number(debt||0)>0) return false;
 
     if(!q) return true;
     const haystack=[
-      r.last_name,r.first_name,r.dni,r.gender,dateLabel(r.birth_date),...teams
+      r.last_name,r.first_name,r.dni,r.gender,dateLabel(r.birth_date),...teams.map(t=>t.name)
     ].filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(q);
   });
 
+  const filterCount=playerFiltersActiveCount();
+
   content.innerHTML=`
     <div class="toolbar">
       <input id="playerSearch" class="grow" placeholder="Buscar por DNI, apellido, nombre o equipo" value="${esc(search)}">
-      <select id="playerFilter" style="max-width:220px">
-        <option value="all" ${filter==='all'?'selected':''}>Todos</option>
-        <option value="enabled" ${filter==='enabled'?'selected':''}>Habilitados</option>
-        <option value="disabled" ${filter==='disabled'?'selected':''}>No habilitados</option>
-        <option value="sin_equipo" ${filter==='sin_equipo'?'selected':''}>Sin equipo</option>
-        <option value="injured" ${filter==='injured'?'selected':''}>Lesionados</option>
-      </select>
+      <button class="btn light" id="openPlayerFilters">⚙ Filtrar${filterCount? ` (${filterCount})`:''}</button>
       <button class="btn light" id="exportPlayers">📊 EXPORTAR EXCEL</button>
       <button class="btn primary" id="newPlayer">+ Nuevo jugador</button>
     </div>
@@ -437,25 +572,33 @@ async function renderPlayers(search='',filter='all'){
       <div class="metric red player-metric" data-filter="disabled" style="cursor:pointer"><div class="label">No habilitados</div><div class="value">${disabledCount}</div><div class="sub">No habilitados para jugar</div></div>
     </div>
 
-    <div style="margin:0 0 12px;color:#666;font-weight:700">Mostrando ${rows.length} · Filtro: ${esc(playerFilterLabel(filter))}</div>
+    <div style="margin:0 0 12px;color:#666;font-weight:700">Mostrando ${rows.length} · Filtro: ${esc(playerFilterSummary())}</div>
 
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Jugador</th><th>DNI</th><th>Equipo/s</th><th>Nacimiento</th><th>Estado</th><th>Acciones</th></tr></thead>
+    <div class="table-wrap"><table class="data-table player-compact-table">
+      <thead><tr><th>Jugador</th><th>DNI</th><th>Equipo/s</th><th>Nacimiento</th><th>Estado</th><th>Deuda</th><th>Acciones</th></tr></thead>
       <tbody>
         ${rows.length?rows.map(r=>{
-          const teams=resolvedTeamMap.get(String(r.id))||[];
+          const teams=teamMap.get(String(r.id))||[];
+          const debt=debtMap.get(String(r.id));
+          const debtHtml=debt==null
+            ? '<span style="color:#888;font-weight:800">-</span>'
+            : Number(debt)>0
+              ? `<span class="money negative">${money(debt)}</span>`
+              : '<span class="money positive">SIN DEUDA</span>';
+
           return `<tr class="player-row" data-id="${r.id}" style="cursor:pointer">
             <td class="name-cell"><span style="text-decoration:underline;text-decoration-color:#ddd;text-underline-offset:3px">${esc(r.last_name)} ${esc(r.first_name)}</span></td>
             <td>${esc(r.dni)}</td>
-            <td>${esc(teams.join(', ')||'Sin equipo')}</td>
+            <td>${esc(teams.map(t=>t.name).join(', ')||'Sin equipo')}</td>
             <td>${dateLabel(r.birth_date)}</td>
             <td>${activeStatus(r)}</td>
+            <td>${debtHtml}</td>
             <td><div class="actions">
               <button class="btn light small edit-player" data-id="${r.id}">Editar</button>
               <button class="btn light small account-player" data-id="${r.id}">Cuenta</button>
             </div></td>
           </tr>`;
-        }).join(''):'<tr><td colspan="6"><div class="empty">No hay jugadores que coincidan con los filtros.</div></td></tr>'}
+        }).join(''):'<tr><td colspan="7"><div class="empty">No hay jugadores que coincidan con los filtros.</div></td></tr>'}
       </tbody>
     </table></div>
   `;
@@ -463,15 +606,21 @@ async function renderPlayers(search='',filter='all'){
   let timer;
   $('#playerSearch').oninput=e=>{
     clearTimeout(timer);
-    timer=setTimeout(()=>renderPlayers(e.target.value.trim(),$('#playerFilter').value),300);
+    timer=setTimeout(()=>renderPlayers(e.target.value.trim()),300);
   };
-  $('#playerFilter').onchange=e=>renderPlayers($('#playerSearch').value.trim(),e.target.value);
-  $('#exportPlayers').onclick=()=>exportPlayersExcel(sorted,resolvedTeamMap);
+  $('#openPlayerFilters').onclick=()=>openPlayerFilters($('#playerSearch').value.trim());
+  $('#exportPlayers').onclick=()=>exportPlayersExcel(sorted,teamMap,debtMap);
   $('#newPlayer').onclick=()=>editPlayer();
 
-  $$('.player-metric').forEach(card=>card.onclick=()=>renderPlayers($('#playerSearch').value.trim(),card.dataset.filter||'all'));
+  $$('.player-metric').forEach(card=>card.onclick=async()=>{
+    const type=card.dataset.filter||'all';
+    if(type==='all') playerFilters={team:'all',status:'all',injury:'all',debt:'all'};
+    if(type==='sin_equipo') playerFilters={...playerFilters,team:'none'};
+    if(type==='disabled') playerFilters={...playerFilters,status:'disabled'};
+    await renderPlayers($('#playerSearch').value.trim());
+  });
 
-  $$('.player-row').forEach(tr=>tr.onclick=()=>openPlayerGuardians(rows.find(r=>String(r.id)===String(tr.dataset.id)),resolvedTeamMap));
+  $$('.player-row').forEach(tr=>tr.onclick=()=>openPlayerGuardians(rows.find(r=>String(r.id)===String(tr.dataset.id)),teamMap));
   $$('.edit-player').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
     editPlayer(rows.find(r=>String(r.id)===String(b.dataset.id)));
@@ -590,7 +739,8 @@ async function editPlayer(row=null){
 
       closeModal();
       toast(row?'Jugador actualizado correctamente':'Jugador creado correctamente');
-      await renderPlayers();
+      playerAdminCache=null;
+      await renderPlayers('',true);
     }catch(ex){
       console.error('SAVE PLAYER ERROR:',ex);
       toast(ex?.message||'No pudimos guardar el jugador.','error');
@@ -752,15 +902,132 @@ async function openPlayerAccount(row){
   }
 }
 
+
 async function renderTeams(){
-  const {data,error}=await supabase.from('teams').select('*').order('name'); if(error) throw error;
-  const teams=data||[]; content.innerHTML=`<div class="toolbar"><button class="btn primary" id="newTeam">+ Nuevo equipo</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Equipo</th><th>Categoría</th><th>Tira</th><th>Temporada</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${teams.map(t=>`<tr><td class="name-cell">${esc(t.name)}</td><td>${esc(t.category)}</td><td>${esc(t.tira)}</td><td>${t.season}</td><td>${t.is_enabled?statusBadge('ACTIVO','green'):statusBadge('INACTIVO','gray')}</td><td><button class="btn light small edit-team" data-id="${t.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>`;
-  $('#newTeam').onclick=()=>editTeam(); $$('.edit-team').forEach(b=>b.onclick=()=>editTeam(teams.find(x=>x.id===b.dataset.id)));
+  const {data,error}=await supabase.from('teams').select('*').order('name');
+  if(error) throw error;
+  const teams=data||[];
+
+  content.innerHTML=`
+    <div class="toolbar"><button class="btn primary" id="newTeam">+ Nuevo equipo</button></div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Equipo</th><th>Categoría</th><th>Tira</th><th>Temporada</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>
+        ${teams.map(t=>`<tr>
+          <td class="name-cell">${esc(t.name)}</td>
+          <td>${esc(t.category)}</td>
+          <td>${esc(t.tira)}</td>
+          <td>${t.season}</td>
+          <td>${t.is_enabled?statusBadge('ACTIVO','green'):statusBadge('INACTIVO','gray')}</td>
+          <td><button class="btn light small edit-team" data-id="${t.id}">Editar</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+
+  $('#newTeam').onclick=()=>editTeam();
+  $$('.edit-team').forEach(b=>b.onclick=()=>editTeam(teams.find(x=>x.id===b.dataset.id)));
 }
+
 async function editTeam(row=null){
-  let currentCoach='',currentLeague=''; if(row){const [c,l]=await Promise.all([supabase.from('team_coaches').select('coach_id').eq('team_id',row.id).maybeSingle(),supabase.from('team_leagues').select('league_id').eq('team_id',row.id).maybeSingle()]);currentCoach=c.data?.coach_id||'';currentLeague=l.data?.league_id||'';}
-  openModal(row?'Editar equipo':'Nuevo equipo',`<form id="teamForm" class="form-grid"><label>Nombre<input name="name" required value="${esc(row?.name||'')}"></label><label>Categoría<input name="category" value="${esc(row?.category||'')}"></label><label>Tira<select name="tira"><option ${row?.tira==='VIOLETA'?'selected':''}>VIOLETA</option><option ${row?.tira==='BLANCA'?'selected':''}>BLANCA</option></select></label><label>Temporada<input name="season" type="number" value="${row?.season||new Date().getFullYear()}"></label><label>Entrenador<select name="coach"><option value="">Sin asignar</option>${catalogs.coaches.map(c=>`<option value="${c.id}" ${currentCoach===c.id?'selected':''}>${esc(c.first_name)} ${esc(c.last_name)}</option>`).join('')}</select></label><label>Liga<select name="league"><option value="">Sin asignar</option>${catalogs.leagues.map(l=>`<option value="${l.id}" ${currentLeague===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label><label>Estado<select name="enabled"><option value="true" ${row?.is_enabled!==false?'selected':''}>Activo</option><option value="false" ${row?.is_enabled===false?'selected':''}>Inactivo</option></select></label><div class="form-actions span-2"><button type="button" id="cancelModal" class="btn light">Cancelar</button><button class="btn primary">Guardar</button></div></form>`); $('#cancelModal').onclick=closeModal;
-  $('#teamForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);const payload={name:fd.get('name').trim(),category:fd.get('category').trim(),tira:fd.get('tira'),season:Number(fd.get('season')),condition:'mixta',is_enabled:fd.get('enabled')==='true'};let id=row?.id;if(row){const {error}=await supabase.from('teams').update(payload).eq('id',id);if(error){toast(error.message,'error');return;}}else{const {data,error}=await supabase.from('teams').insert(payload).select('id').single();if(error){toast(error.message,'error');return;}id=data.id;}const coach=fd.get('coach')||null,league=fd.get('league')||null;let r=await supabase.rpc('admin_set_team_single_coach',{p_team_id:id,p_coach_id:coach||null});if(r.error){toast(r.error.message,'error');return;}r=await supabase.rpc('admin_set_team_single_league',{p_team_id:id,p_league_id:league||null});if(r.error){toast(r.error.message,'error');return;}closeModal();toast('Equipo guardado');await loadCatalogs();renderTeams();};
+  let currentCoach='',currentLeague='';
+
+  if(row){
+    const [c,l]=await Promise.all([
+      supabase.from('team_coaches').select('coach_id').eq('team_id',row.id).maybeSingle(),
+      supabase.from('team_leagues').select('league_id').eq('team_id',row.id).maybeSingle()
+    ]);
+    currentCoach=c.data?.coach_id||'';
+    currentLeague=l.data?.league_id||'';
+  }
+
+  const tiraValue=String(row?.tira||'UNICA').toUpperCase();
+  const tiras=['ROJA','AMARILLA','AZUL','UNICA'];
+
+  openModal(row?'Editar equipo':'Nuevo equipo',`
+    <form id="teamForm" class="form-grid">
+      <label>Nombre<input name="name" required value="${esc(row?.name||'')}"></label>
+      <label>Categoría<input name="category" value="${esc(row?.category||'')}"></label>
+
+      <label>Tira
+        <select name="tira">
+          ${tiras.map(t=>`<option value="${t}" ${tiraValue===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </label>
+
+      <label>Temporada<input name="season" type="number" value="${row?.season||new Date().getFullYear()}"></label>
+
+      <label>Entrenador
+        <select name="coach">
+          <option value="">Sin asignar</option>
+          ${catalogs.coaches.map(coach=>`
+            <option value="${coach.id}" ${String(currentCoach)===String(coach.id)?'selected':''}>
+              ${esc([coach.last_name,coach.first_name].filter(Boolean).join(' '))}
+            </option>
+          `).join('')}
+        </select>
+      </label>
+
+      <label>Liga
+        <select name="league">
+          <option value="">Sin asignar</option>
+          ${catalogs.leagues.map(l=>`<option value="${l.id}" ${String(currentLeague)===String(l.id)?'selected':''}>${esc(l.name)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label>Estado
+        <select name="enabled">
+          <option value="true" ${row?.is_enabled!==false?'selected':''}>Activo</option>
+          <option value="false" ${row?.is_enabled===false?'selected':''}>Inactivo</option>
+        </select>
+      </label>
+
+      <div class="form-actions span-2">
+        <button type="button" id="cancelModal" class="btn light">Cancelar</button>
+        <button class="btn primary">Guardar</button>
+      </div>
+    </form>
+  `);
+
+  $('#cancelModal').onclick=closeModal;
+
+  $('#teamForm').onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.target);
+    const payload={
+      name:String(fd.get('name')||'').trim(),
+      category:String(fd.get('category')||'').trim(),
+      tira:String(fd.get('tira')||'UNICA'),
+      season:Number(fd.get('season')),
+      condition:'mixta',
+      is_enabled:fd.get('enabled')==='true'
+    };
+
+    let id=row?.id;
+    if(row){
+      const {error}=await supabase.from('teams').update(payload).eq('id',id);
+      if(error){toast(error.message,'error');return;}
+    }else{
+      const {data,error}=await supabase.from('teams').insert(payload).select('id').single();
+      if(error){toast(error.message,'error');return;}
+      id=data.id;
+    }
+
+    const coach=fd.get('coach')||null;
+    const league=fd.get('league')||null;
+
+    let r=await supabase.rpc('admin_set_team_single_coach',{p_team_id:id,p_coach_id:coach||null});
+    if(r.error){toast(r.error.message,'error');return;}
+
+    r=await supabase.rpc('admin_set_team_single_league',{p_team_id:id,p_league_id:league||null});
+    if(r.error){toast(r.error.message,'error');return;}
+
+    closeModal();
+    toast('Equipo guardado');
+    playerAdminCache=null;
+    await loadCatalogs();
+    renderTeams();
+  };
 }
 
 async function renderLeagues(){
