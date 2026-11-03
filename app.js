@@ -1654,33 +1654,97 @@ function openPaymentFilters(search){
 
 async function openDebtDetail(row){
   try{
-    const {data,error}=await supabase.rpc('admin_finance_get_payment_options',{p_student_id:row.id});
-    if(error) throw error;
+    const [accountRes,optionsRes]=await Promise.all([
+      supabase.rpc('admin_finance_get_account',{p_student_id:row.id}),
+      supabase.rpc('admin_finance_get_payment_options',{p_student_id:row.id})
+    ]);
 
-    const charges=Array.isArray(data?.pending_charges)?data.pending_charges:[];
-    const debt=charges.reduce((sum,item)=>sum+Number(item.balance||0),0);
+    if(accountRes.error) throw accountRes.error;
+    if(optionsRes.error) throw optionsRes.error;
+
+    const account=accountRes.data||{};
+    const charges=Array.isArray(optionsRes.data?.pending_charges)?optionsRes.data.pending_charges:[];
+    const debt=Number(account.debt||0);
+
+    const today=new Date();
+    today.setHours(0,0,0,0);
+
+    const dueDateOf=item=>{
+      const raw=item?.due_date||item?.due_at||item?.billing_date||item?.period_due_date||null;
+      if(!raw) return null;
+      const date=new Date(String(raw).slice(0,10)+'T00:00:00');
+      return Number.isNaN(date.getTime())?null:date;
+    };
+
+    let overdueCharges=[];
+    let futureCharges=[];
+
+    if(debt<=0){
+      futureCharges=[...charges];
+    }else{
+      charges.forEach(item=>{
+        const due=dueDateOf(item);
+        const explicitlyOverdue=item?.is_overdue===true || item?.overdue===true;
+        const explicitlyFuture=item?.is_overdue===false || item?.overdue===false;
+        if(explicitlyOverdue || (due && due<today)) overdueCharges.push(item);
+        else if(explicitlyFuture || (due && due>=today)) futureCharges.push(item);
+        else overdueCharges.push(item);
+      });
+    }
+
+    const conceptRows=items=>items.map(item=>`
+      <tr>
+        <td class="name-cell">${esc(item.concept||item.name||'Concepto')}</td>
+        <td class="money ${debt>0?'negative':''}">${money(item.balance)}</td>
+      </tr>
+    `).join('');
 
     openModal(`Deuda · ${row.last_name||''} ${row.first_name||''}`,`
       <div class="metrics account-metrics">
         <div class="metric ${debt>0?'red':'green'}">
-          <div class="label">Deuda total</div>
+          <div class="label">Deuda vencida</div>
           <div class="value">${debt>0?money(debt):'SIN DEUDA'}</div>
-          <div class="sub">Detalle de conceptos pendientes</div>
+          <div class="sub">${debt>0?'Conceptos ya vencidos':'No registra conceptos vencidos'}</div>
         </div>
+
+        ${futureCharges.length?`
+          <div class="metric future-metric">
+            <div class="label">Próximos conceptos</div>
+            <div class="value">${futureCharges.length}</div>
+            <div class="sub">Conceptos todavía no vencidos</div>
+          </div>
+        `:''}
       </div>
-      <div class="table-wrap" style="margin-top:14px">
-        <table class="data-table">
-          <thead><tr><th>Concepto</th><th>Importe pendiente</th></tr></thead>
-          <tbody>
-            ${charges.length?charges.map(item=>`
-              <tr>
-                <td class="name-cell">${esc(item.concept||item.name||'Concepto')}</td>
-                <td class="money negative">${money(item.balance)}</td>
-              </tr>
-            `).join(''):'<tr><td colspan="2"><div class="empty">El jugador no tiene deuda pendiente.</div></td></tr>'}
-          </tbody>
-        </table>
-      </div>
+
+      ${debt>0?`
+        <div class="section-title" style="margin-top:16px">DEUDA VENCIDA</div>
+        <div class="table-wrap" style="margin-top:8px">
+          <table class="data-table">
+            <thead><tr><th>Concepto</th><th>Importe pendiente</th></tr></thead>
+            <tbody>
+              ${overdueCharges.length?conceptRows(overdueCharges):`<tr><td colspan="2"><div class="empty">La deuda vencida total es ${money(debt)}.</div></td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      `:''}
+
+      ${futureCharges.length?`
+        <div class="future-concepts-card">
+          <div class="future-concepts-head">
+            <div>
+              <div class="future-concepts-title">PRÓXIMOS CONCEPTOS</div>
+              <div class="future-concepts-sub">Todavía no forman parte de la deuda vencida.</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Concepto</th><th>Importe</th></tr></thead>
+              <tbody>${conceptRows(futureCharges)}</tbody>
+            </table>
+          </div>
+        </div>
+      `:debt<=0?'<div class="empty" style="margin-top:16px">No tiene deuda ni próximos conceptos pendientes.</div>':''}
+
       <div class="form-actions">
         <button class="btn primary" id="debtLoadPayment">Cargar pago</button>
       </div>
