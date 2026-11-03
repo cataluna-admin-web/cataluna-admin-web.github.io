@@ -27,6 +27,8 @@ let playerFilters = { team:'all', status:'all', injury:'all', debt:'all' };
 let playerAdminCache = null;
 let adminSyncChannel = null;
 let adminSyncTimer = null;
+let paymentAdminCache = null;
+let paymentFilters = { team:'all', activity:'all', discount:'all', debt:'all' };
 
 const sectionTitles = {
   dashboard:'Dashboard', players:'Jugadores', teams:'Equipos', matches:'Partidos',
@@ -171,6 +173,7 @@ async function verifyAdmin(){
 
 function scheduleAdminSyncRefresh(){
   playerAdminCache=null;
+  paymentAdminCache=null;
   clearTimeout(adminSyncTimer);
   adminSyncTimer=setTimeout(async()=>{
     if(document.hidden) return;
@@ -229,25 +232,50 @@ $('#loginForm').addEventListener('submit',async e=>{
 });
 $('#logoutButton').onclick=async()=>{await supabase.auth.signOut(); location.reload();};
 
+
+async function loadAllStaffUsers(){
+  const pageSize=100;
+  let offset=0;
+  const rows=[];
+
+  while(true){
+    const {data,error}=await supabase.rpc('admin_get_staff_users_page',{
+      p_search:'',
+      p_limit:pageSize,
+      p_offset:offset
+    });
+
+    if(error){
+      console.warn('STAFF USERS RPC ERROR',error);
+      break;
+    }
+
+    const page=Array.isArray(data)?data:[];
+    rows.push(...page);
+    offset+=page.length;
+
+    const total=page.length?Number(page[0]?.total_count||rows.length):rows.length;
+    if(page.length===0 || page.length<pageSize || rows.length>=total) break;
+  }
+
+  const unique=new Map();
+  rows.forEach(row=>{
+    if(row?.id) unique.set(String(row.id),row);
+  });
+  return [...unique.values()];
+}
+
 async function loadCatalogs(){
-  const [teams,leagues,profiles,extraRoles] = await Promise.all([
+  const [teams,leagues,staffUsers] = await Promise.all([
     supabase.from('teams').select('*').eq('is_enabled',true).order('name'),
     supabase.from('leagues').select('*').eq('is_enabled',true).order('name'),
-    supabase.from('profiles').select('id,first_name,last_name,role,is_enabled,is_active').eq('is_enabled',true).eq('is_active',true).order('last_name'),
-    supabase.from('profile_roles').select('profile_id,role,is_enabled').eq('role','entrenador').eq('is_enabled',true)
+    loadAllStaffUsers()
   ]);
 
   catalogs.teams=teams.data||[];
   catalogs.leagues=leagues.data||[];
-
-  const coachIds=new Set(
-    (extraRoles.data||[])
-      .map(r=>String(r.profile_id||''))
-      .filter(Boolean)
-  );
-
-  catalogs.coaches=(profiles.data||[])
-    .filter(p=>p.role==='entrenador'||coachIds.has(String(p.id)))
+  catalogs.coaches=(staffUsers||[])
+    .filter(user=>String(user.role||'').toLowerCase()==='entrenador')
     .sort((a,b)=>{
       const last=String(a.last_name||'').localeCompare(String(b.last_name||''),'es',{sensitivity:'base'});
       if(last!==0) return last;
@@ -259,7 +287,7 @@ $('#mainNav').addEventListener('click',e=>{ const b=e.target.closest('[data-sect
 $('#refreshButton').onclick=()=>navigate(activeSection,true);
 async function navigate(section,force=false){
   activeSection=section; destroyCharts();
-  if(force) playerAdminCache=null;
+  if(force){ playerAdminCache=null; paymentAdminCache=null; }
   $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.section===section));
   titleEl.textContent=sectionTitles[section]||section; eyebrowEl.textContent='CATALUÑA · ADMIN WEB'; loading();
   try{
@@ -954,6 +982,8 @@ async function openPlayerAccount(row){
         if(error) throw error;
 
         toast('Actividad y descuento actualizados');
+        paymentAdminCache=null;
+        playerAdminCache=null;
         await openPlayerAccount(row);
       }catch(ex){
         console.error('SAVE BILLING PROFILE ERROR:',ex);
@@ -1453,74 +1483,256 @@ function editSponsor(r=null){openModal(r?'Editar sponsor':'Nuevo sponsor',`<form
 async function renderBenefits(){const {data,error}=await supabase.from('benefits').select('*').order('created_at',{ascending:false});if(error)throw error;const rows=data||[];content.innerHTML=`<div class="toolbar"><button id="newBenefit" class="btn primary">+ Nuevo beneficio</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Beneficio</th><th>Marca</th><th>Descripción</th><th></th></tr></thead><tbody>${rows.map(r=>`<tr><td class="name-cell">${esc(r.benefit)}</td><td>${esc(r.brand_name)}</td><td>${esc(r.description||'-')}</td><td><button class="btn light small edit-benefit" data-id="${r.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>`;$('#newBenefit').onclick=()=>editBenefit();$$('.edit-benefit').forEach(b=>b.onclick=()=>editBenefit(rows.find(r=>r.id===b.dataset.id)));}
 function editBenefit(r=null){openModal(r?'Editar beneficio':'Nuevo beneficio',`<form id="benefitForm" class="form-grid"><label>Beneficio<input name="benefit" required value="${esc(r?.benefit||'')}"></label><label>Marca<input name="brand" required value="${esc(r?.brand_name||'')}"></label><label class="span-2">Descripción<textarea name="description" rows="3">${esc(r?.description||'')}</textarea></label><label>URL logo<input name="logo" value="${esc(r?.logo_url||'')}"></label><label>Sitio web<input name="web" value="${esc(r?.website_url||'')}"></label><div class="form-actions span-2"><button type="button" id="cancelModal" class="btn light">Cancelar</button><button class="btn primary">Guardar</button></div></form>`);$('#cancelModal').onclick=closeModal;$('#benefitForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);const {error}=await supabase.rpc('admin_save_benefit',{p_benefit_id:r?.id||'',p_benefit:fd.get('benefit'),p_description:fd.get('description'),p_brand_name:fd.get('brand'),p_logo_url:fd.get('logo'),p_website_url:fd.get('web')});if(error){toast(error.message,'error');return;}closeModal();toast('Beneficio guardado');renderBenefits();};}
 
-async function renderPayments(){
-  content.innerHTML=`
-    <div class="toolbar">
-      <input id="paySearch" class="grow" placeholder="Buscar jugador por DNI, nombre o apellido">
-      <button id="paySearchBtn" class="btn primary">Buscar</button>
-    </div>
-    <div id="payResults">
-      <div class="card">
-        <h3>Gestión de cuentas</h3>
-        <p class="section-note">Buscá un jugador para asignar actividad y descuento, cargar pagos o revisar pagos informados por sus adultos responsables.</p>
+
+async function loadPaymentsAdminData(force=false){
+  if(paymentAdminCache && !force) return paymentAdminCache;
+
+  const [{items:players},settingsRes]=await Promise.all([
+    loadAllPlayers(),
+    supabase.rpc('admin_finance_get_settings',{})
+  ]);
+
+  if(settingsRes.error) throw settingsRes.error;
+
+  const teamMap=await loadPlayerTeamMap(players);
+  const settings=settingsRes.data||{};
+  const accountMap=new Map();
+
+  for(let i=0;i<players.length;i+=12){
+    const batch=players.slice(i,i+12);
+    const results=await Promise.all(batch.map(async player=>{
+      const {data,error}=await supabase.rpc('admin_finance_get_account',{p_student_id:player.id});
+      return {
+        id:String(player.id),
+        account:error?{}:(data||{})
+      };
+    }));
+    results.forEach(item=>accountMap.set(item.id,item.account));
+  }
+
+  paymentAdminCache={players,teamMap,settings,accountMap};
+  return paymentAdminCache;
+}
+
+function openPaymentFilters(search){
+  const teams=(catalogs.teams||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'es',{sensitivity:'base'}));
+  const activities=paymentAdminCache?.settings?.activities||[];
+  const discounts=paymentAdminCache?.settings?.discounts||[];
+
+  openModal('Filtrar pagos',`
+    <form id="paymentFiltersForm" class="form-grid">
+      <label>Equipo
+        <select name="team">
+          <option value="all" ${paymentFilters.team==='all'?'selected':''}>Todos los equipos</option>
+          <option value="none" ${paymentFilters.team==='none'?'selected':''}>Sin equipo</option>
+          ${teams.map(t=>`<option value="${t.id}" ${String(paymentFilters.team)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label>Actividad
+        <select name="activity">
+          <option value="all" ${paymentFilters.activity==='all'?'selected':''}>Todas las actividades</option>
+          <option value="none" ${paymentFilters.activity==='none'?'selected':''}>Sin actividad</option>
+          ${activities.map(a=>`<option value="${a.id}" ${String(paymentFilters.activity)===String(a.id)?'selected':''}>${esc(a.name)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label>Descuento
+        <select name="discount">
+          <option value="all" ${paymentFilters.discount==='all'?'selected':''}>Todos</option>
+          <option value="none" ${paymentFilters.discount==='none'?'selected':''}>Sin descuento</option>
+          ${discounts.map(d=>`<option value="${d.id}" ${String(paymentFilters.discount)===String(d.id)?'selected':''}>${esc(d.name)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label>Deuda
+        <select name="debt">
+          <option value="all" ${paymentFilters.debt==='all'?'selected':''}>Todos</option>
+          <option value="with_debt" ${paymentFilters.debt==='with_debt'?'selected':''}>Con deuda</option>
+          <option value="no_debt" ${paymentFilters.debt==='no_debt'?'selected':''}>Sin deuda</option>
+        </select>
+      </label>
+
+      <div class="form-actions span-2">
+        <button type="button" class="btn light" id="clearPaymentFilters">Limpiar filtros</button>
+        <button type="button" class="btn light" id="cancelPaymentFilters">Cancelar</button>
+        <button class="btn primary" type="submit">Aplicar filtros</button>
       </div>
-    </div>
-  `;
+    </form>
+  `);
 
-  const runSearch=async()=>{
-    const q=$('#paySearch').value.trim();
-    if(!q){
-      toast('Ingresá DNI, nombre o apellido.','error');
-      return;
-    }
+  $('#cancelPaymentFilters').onclick=closeModal;
+  $('#clearPaymentFilters').onclick=async()=>{
+    paymentFilters={team:'all',activity:'all',discount:'all',debt:'all'};
+    closeModal();
+    await renderPayments(search);
+  };
+  $('#paymentFiltersForm').onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.currentTarget);
+    paymentFilters={
+      team:String(fd.get('team')||'all'),
+      activity:String(fd.get('activity')||'all'),
+      discount:String(fd.get('discount')||'all'),
+      debt:String(fd.get('debt')||'all')
+    };
+    closeModal();
+    await renderPayments(search);
+  };
+}
 
-    const {data,error}=await supabase.rpc('admin_get_students_page',{
-      p_search:q,
-      p_filter:'all',
-      p_limit:30,
-      p_offset:0
-    });
+async function openDebtDetail(row){
+  try{
+    const {data,error}=await supabase.rpc('admin_finance_get_payment_options',{p_student_id:row.id});
+    if(error) throw error;
 
-    if(error){
-      toast(error.message,'error');
-      return;
-    }
+    const charges=Array.isArray(data?.pending_charges)?data.pending_charges:[];
+    const debt=charges.reduce((sum,item)=>sum+Number(item.balance||0),0);
 
-    const rows=data?.items||[];
-
-    $('#payResults').innerHTML=rows.length?`
-      <div class="table-wrap">
+    openModal(`Deuda · ${row.last_name||''} ${row.first_name||''}`,`
+      <div class="metrics account-metrics">
+        <div class="metric ${debt>0?'red':'green'}">
+          <div class="label">Deuda total</div>
+          <div class="value">${debt>0?money(debt):'SIN DEUDA'}</div>
+          <div class="sub">Detalle de conceptos pendientes</div>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:14px">
         <table class="data-table">
-          <thead><tr><th>Jugador</th><th>DNI</th><th>Gestión</th></tr></thead>
+          <thead><tr><th>Concepto</th><th>Importe pendiente</th></tr></thead>
           <tbody>
-            ${rows.map(r=>`<tr>
-              <td class="name-cell">${esc(r.first_name)} ${esc(r.last_name)}</td>
-              <td>${esc(r.dni)}</td>
-              <td>
-                <div class="actions">
-                  <button class="btn light small pay-account" data-id="${r.id}">Cuenta</button>
-                  <button class="btn primary small pay-new" data-id="${r.id}">Cargar pago</button>
-                  <button class="btn light small pay-review" data-id="${r.id}">Revisar pagos</button>
-                </div>
-              </td>
-            </tr>`).join('')}
+            ${charges.length?charges.map(item=>`
+              <tr>
+                <td class="name-cell">${esc(item.concept||item.name||'Concepto')}</td>
+                <td class="money negative">${money(item.balance)}</td>
+              </tr>
+            `).join(''):'<tr><td colspan="2"><div class="empty">El jugador no tiene deuda pendiente.</div></td></tr>'}
           </tbody>
         </table>
       </div>
-    `:'<div class="card"><div class="empty">No encontramos jugadores con esa búsqueda.</div></div>';
+      <div class="form-actions">
+        <button class="btn primary" id="debtLoadPayment">Cargar pago</button>
+      </div>
+    `);
 
-    $$('.pay-account').forEach(b=>b.onclick=()=>openPlayerAccount(rows.find(r=>r.id===b.dataset.id)));
-    $$('.pay-new').forEach(b=>b.onclick=()=>openPaymentEntry(rows.find(r=>r.id===b.dataset.id)));
-    $$('.pay-review').forEach(b=>b.onclick=()=>openPaymentReview(rows.find(r=>r.id===b.dataset.id)));
-  };
+    $('#debtLoadPayment').onclick=()=>openPaymentEntry(row);
+  }catch(ex){
+    console.error('DEBT DETAIL ERROR',ex);
+    toast(ex?.message||'No pudimos cargar el detalle de deuda.','error');
+  }
+}
 
-  $('#paySearchBtn').onclick=runSearch;
-  $('#paySearch').addEventListener('keydown',e=>{
-    if(e.key==='Enter'){
-      e.preventDefault();
-      runSearch();
-    }
+
+async function renderPayments(search='',force=false){
+  const {players,teamMap,settings,accountMap}=await loadPaymentsAdminData(force);
+  const activities=settings.activities||[];
+  const discounts=settings.discounts||[];
+  const activityById=new Map(activities.map(a=>[String(a.id),a]));
+  const discountById=new Map(discounts.map(d=>[String(d.id),d]));
+
+  const sorted=[...players].sort((a,b)=>{
+    const last=String(a.last_name||'').localeCompare(String(b.last_name||''),'es',{sensitivity:'base'});
+    if(last!==0) return last;
+    return String(a.first_name||'').localeCompare(String(b.first_name||''),'es',{sensitivity:'base'});
   });
+
+  const q=String(search||'').trim().toLowerCase();
+
+  const rows=sorted.filter(row=>{
+    const teams=teamMap.get(String(row.id))||[];
+    const account=accountMap.get(String(row.id))||{};
+    const debt=Number(account.debt||0);
+
+    if(paymentFilters.team==='none' && teams.length>0) return false;
+    if(paymentFilters.team!=='all' && paymentFilters.team!=='none' && !teams.some(t=>String(t.id)===String(paymentFilters.team))) return false;
+
+    if(paymentFilters.activity==='none' && account.activity_id) return false;
+    if(paymentFilters.activity!=='all' && paymentFilters.activity!=='none' && String(account.activity_id||'')!==String(paymentFilters.activity)) return false;
+
+    if(paymentFilters.discount==='none' && account.discount_id) return false;
+    if(paymentFilters.discount!=='all' && paymentFilters.discount!=='none' && String(account.discount_id||'')!==String(paymentFilters.discount)) return false;
+
+    if(paymentFilters.debt==='with_debt' && debt<=0) return false;
+    if(paymentFilters.debt==='no_debt' && debt>0) return false;
+
+    if(!q) return true;
+    const activity=activityById.get(String(account.activity_id||''))?.name||account.activity_name||'';
+    const discount=discountById.get(String(account.discount_id||''))?.name||account.discount_name||'';
+    const haystack=[
+      row.last_name,row.first_name,row.dni,
+      ...teams.map(t=>t.name),activity,discount
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+
+  const activeFilters=Object.values(paymentFilters).filter(v=>v!=='all').length;
+
+  content.innerHTML=`
+    <div class="toolbar">
+      <input id="paySearch" class="grow" placeholder="Buscar por DNI, apellido, nombre, equipo o actividad" value="${esc(search)}">
+      <button id="payFilterBtn" class="btn light">⚙ Filtrar${activeFilters?` (${activeFilters})`:''}</button>
+    </div>
+
+    <div style="margin:0 0 12px;color:#666;font-weight:700">Mostrando ${rows.length} de ${sorted.length} jugadores</div>
+
+    <div class="table-wrap">
+      <table class="data-table player-compact-table">
+        <thead>
+          <tr>
+            <th>Jugador</th>
+            <th>Equipo/s</th>
+            <th>Actividad</th>
+            <th>Descuento</th>
+            <th>Deuda</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.length?rows.map(row=>{
+            const teams=teamMap.get(String(row.id))||[];
+            const account=accountMap.get(String(row.id))||{};
+            const activity=activityById.get(String(account.activity_id||''))?.name||account.activity_name||'SIN ACTIVIDAD';
+            const discount=discountById.get(String(account.discount_id||''))?.name||account.discount_name||'SIN DESCUENTO';
+            const discountPct=Number(account.discount_percentage||discountById.get(String(account.discount_id||''))?.percentage||0);
+            const debt=Number(account.debt||0);
+            return `
+              <tr>
+                <td class="name-cell">${esc(row.last_name)} ${esc(row.first_name)}</td>
+                <td>${esc(teams.map(t=>t.name).join(', ')||'Sin equipo')}</td>
+                <td>${esc(activity)}</td>
+                <td>${esc(discount)}${discountPct>0?` · ${discountPct}%`:''}</td>
+                <td>
+                  <button class="debt-link ${debt>0?'has-debt':'no-debt'}" data-id="${row.id}">
+                    ${debt>0?money(debt):'SIN DEUDA'}
+                  </button>
+                </td>
+                <td>
+                  <div class="actions">
+                    <button class="btn light small pay-account" data-id="${row.id}">Cuenta</button>
+                    <button class="btn primary small pay-new" data-id="${row.id}">Cargar pago</button>
+                    <button class="btn light small pay-review" data-id="${row.id}">Revisar pago</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join(''):'<tr><td colspan="6"><div class="empty">No hay jugadores que coincidan con los filtros.</div></td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  let timer;
+  $('#paySearch').oninput=e=>{
+    clearTimeout(timer);
+    timer=setTimeout(()=>renderPayments(e.target.value.trim()),300);
+  };
+  $('#payFilterBtn').onclick=()=>openPaymentFilters($('#paySearch').value.trim());
+
+  const findRow=id=>rows.find(r=>String(r.id)===String(id));
+  $$('.debt-link').forEach(b=>b.onclick=()=>openDebtDetail(findRow(b.dataset.id)));
+  $$('.pay-account').forEach(b=>b.onclick=()=>openPlayerAccount(findRow(b.dataset.id)));
+  $$('.pay-new').forEach(b=>b.onclick=()=>openPaymentEntry(findRow(b.dataset.id)));
+  $$('.pay-review').forEach(b=>b.onclick=()=>openPaymentReview(findRow(b.dataset.id)));
 }
 
 async function openPaymentEntry(row){
@@ -1606,7 +1818,9 @@ async function openPaymentEntry(row){
 
       closeModal();
       toast('Pago registrado correctamente');
-      if(activeSection==='payments') await renderPayments();
+      paymentAdminCache=null;
+      playerAdminCache=null;
+      if(activeSection==='payments') await renderPayments('',true);
     }catch(ex){
       console.error('RECORD PAYMENT ERROR:',ex);
       toast(ex?.message||'No pudimos registrar el pago.','error');
@@ -1697,6 +1911,8 @@ async function openPaymentReview(row){
         if(error) throw error;
 
         toast(action==='approve'?'Pago aprobado correctamente':'Pago rechazado');
+        paymentAdminCache=null;
+        playerAdminCache=null;
         await openPaymentReview(row);
       }catch(ex){
         console.error('RESOLVE PAYMENT ERROR:',ex);
