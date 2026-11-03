@@ -941,6 +941,22 @@ async function editTeam(row=null){
     currentLeague=l.data?.league_id||'';
   }
 
+  let coachOptions=[...(catalogs.coaches||[])];
+  if(currentCoach && !coachOptions.some(coach=>String(coach.id)===String(currentCoach))){
+    const {data:assignedCoach}=await supabase
+      .from('profiles')
+      .select('id,first_name,last_name,role,is_enabled,is_active')
+      .eq('id',currentCoach)
+      .maybeSingle();
+    if(assignedCoach) coachOptions.push(assignedCoach);
+  }
+
+  coachOptions.sort((a,b)=>{
+    const last=String(a.last_name||'').localeCompare(String(b.last_name||''),'es',{sensitivity:'base'});
+    if(last!==0) return last;
+    return String(a.first_name||'').localeCompare(String(b.first_name||''),'es',{sensitivity:'base'});
+  });
+
   const tiraValue=String(row?.tira||'UNICA').toUpperCase();
   const tiras=['ROJA','AMARILLA','AZUL','UNICA'];
 
@@ -960,7 +976,7 @@ async function editTeam(row=null){
       <label>Entrenador
         <select name="coach">
           <option value="">Sin asignar</option>
-          ${catalogs.coaches.map(coach=>`
+          ${coachOptions.map(coach=>`
             <option value="${coach.id}" ${String(currentCoach)===String(coach.id)?'selected':''}>
               ${esc([coach.last_name,coach.first_name].filter(Boolean).join(' '))}
             </option>
