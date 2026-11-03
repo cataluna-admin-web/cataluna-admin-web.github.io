@@ -278,25 +278,30 @@ async function loadPlayerTeamMap(players){
   const map=new Map();
   if(!ids.length) return map;
 
-  const {data,error}=await supabase
-    .from('team_students')
-    .select('student_id,team_id,status')
-    .in('student_id',ids)
-    .eq('status','activo');
+  const teamById=new Map((catalogs.teams||[]).map(team=>[String(team.id),team]));
 
-  if(error){
-    console.warn('PLAYER TEAM MAP ERROR',error);
-    return map;
+  for(let i=0;i<ids.length;i+=75){
+    const batch=ids.slice(i,i+75);
+    const {data,error}=await supabase
+      .from('team_students')
+      .select('student_id,team_id,status')
+      .in('student_id',batch)
+      .eq('status','activo');
+
+    if(error){
+      console.warn('PLAYER TEAM MAP ERROR',error);
+      continue;
+    }
+
+    (data||[]).forEach(link=>{
+      const studentId=String(link.student_id||'');
+      if(!studentId) return;
+      if(!map.has(studentId)) map.set(studentId,[]);
+      const team=teamById.get(String(link.team_id||''));
+      map.get(studentId).push(team?.name||String(link.team_id||''));
+    });
   }
 
-  const teamById=new Map((catalogs.teams||[]).map(team=>[String(team.id),team]));
-  (data||[]).forEach(link=>{
-    const studentId=String(link.student_id||'');
-    if(!studentId) return;
-    if(!map.has(studentId)) map.set(studentId,[]);
-    const team=teamById.get(String(link.team_id||''));
-    map.get(studentId).push(team?.name||String(link.team_id||''));
-  });
   return map;
 }
 
@@ -385,11 +390,7 @@ async function openPlayerGuardians(row,teamMap){
 }
 
 async function renderPlayers(search='',filter='all'){
-  const [{items:allRows,payload},teamMap]=await Promise.all([
-    loadAllPlayers(),
-    (async()=>new Map())()
-  ]);
-
+  const {items:allRows,payload}=await loadAllPlayers();
   const resolvedTeamMap=await loadPlayerTeamMap(allRows);
 
   const sorted=[...allRows].sort((a,b)=>{
