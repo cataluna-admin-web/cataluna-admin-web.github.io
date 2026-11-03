@@ -97,3 +97,10 @@ input[name="is_injured"]{accent-color:var(--red)}
 .control-toggle.off{background:#fdeaea;color:#bb1d1d}
 .control-toggle-dot{width:10px;height:10px;border-radius:50%;background:currentColor}
 @media(max-width:760px){.control-module-row{align-items:flex-start;flex-direction:column}.control-toggle{width:100%}}
+
+
+/* Jugadores · vista compacta */
+.player-compact-table td{padding:8px 13px}
+.player-compact-table th{padding:9px 13px}
+.player-compact-table .btn.small{padding:6px 9px;font-size:11px}
+.player-compact-table .badge{padding:4px 7px}
